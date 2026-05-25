@@ -1,0 +1,88 @@
+================================================================================
+QuanterBack Replay — generated {{ now }}
+Range: {{ start }} → {{ end }}
+Tickers: {{ tickers }}
+LLM calls: {{ llm_calls_made }} / {{ llm_call_cap }}
+================================================================================
+
+Decision summary
+----------------
+  Total decisions: {{ n_decisions }}
+{% for a in action_dist %}
+  {{ a.action }}: {{ a.n }}
+{% endfor %}
+{% if skipped_no_data %}  Skipped (no data): {{ skipped_no_data | join(", ") }}
+{% endif %}
+  Errors: {{ errors_count }}
+
+{% if total_count == 0 %}
+(No synthetic trades generated — either no BUYs or all sims failed.)
+{% else %}
+================================================================================
+Hypothetical performance
+================================================================================
+  Total trades:       {{ headline.n }}
+  Win rate:           {{ headline.win_rate_pct }}%  ({{ headline.wins }}W / {{ headline.losses }}L)
+  Total P&L (qty=10): ${{ headline.total_pnl_usd }}
+  Avg per trade:      ${{ headline.avg_pnl_usd }} ({{ headline.avg_pnl_pct }}%)
+  Best:               {{ headline.best_ticker }} +{{ headline.best_pnl_pct }}%
+  Worst:              {{ headline.worst_ticker }} {{ headline.worst_pnl_pct }}%
+
+================================================================================
+By exit reason
+================================================================================
+{% if by_exit_reason %}
+{% for r in by_exit_reason %}
+  {{ r.reason }}: {{ r.n }} trades, win={{ r.win_rate_pct }}%, avg={{ r.avg_pnl_pct }}%, total=${{ r.total_pnl_usd }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+By holding period
+================================================================================
+{% if by_holding %}
+{% for h in by_holding %}
+  {{ h.bucket }}: {{ h.n }} trades, win={{ h.win_rate_pct }}%, avg={{ h.avg_pnl_pct }}%
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Top winners
+================================================================================
+{% if top_winners %}
+{% for w in top_winners %}
+  {{ w.ticker }}: {{ w.n }}×, win={{ w.win_rate_pct }}%, total=${{ w.total_pnl_usd }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Bottom losers
+================================================================================
+{% if bottom_losers %}
+{% for l in bottom_losers %}
+  {{ l.ticker }}: {{ l.n }}×, win={{ l.win_rate_pct }}%, total=${{ l.total_pnl_usd }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Streaks
+================================================================================
+  Longest win:  {{ streaks.longest_win }}
+  Longest loss: {{ streaks.longest_loss }}
+
+================================================================================
+Risk-adjusted
+================================================================================
+  Trade Sharpe:  {{ risk_adjusted.trade_sharpe }}
+  Max drawdown: ${{ risk_adjusted.max_drawdown_usd }} ({{ risk_adjusted.max_drawdown_pct }}%{% if risk_adjusted.dd_pct_is_capped is defined and risk_adjusted.dd_pct_is_capped %}, capped at 100%{% endif %})
+{% if risk_adjusted.peak_equity_usd is defined and risk_adjusted.peak_equity_usd > 0 %}  Peak equity at max DD: ${{ risk_adjusted.peak_equity_usd }}
+{% endif %}
+{% endif %}

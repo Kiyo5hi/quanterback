@@ -1,0 +1,35 @@
+services:
+  scan:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: quanterback:dev
+    command: supercronic /app/docker/crontab
+    volumes:
+      - ./data:/data
+      - ./config:/config:ro
+    environment:
+      - TZ=America/New_York
+    restart: unless-stopped
+
+  control-bot:
+    image: quanterback:dev
+    command: quanterback control-bot
+    depends_on:
+      - scan
+    volumes:
+      - ./data:/data
+      - ./config:/config:ro
+    restart: unless-stopped
+
+  position-tracker:
+    image: quanterback:dev
+    command: supercronic /app/docker/cron/position-tracker.cron
+    volumes:
+      - ./data:/data
+      - ./config:/config:ro
+    environment:
+      - TZ=America/New_York
+    restart: unless-stopped
+    depends_on:
+      - scan

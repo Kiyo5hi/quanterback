@@ -1,0 +1,72 @@
+{% if error == "no_scan" %}
+(No scan runs found in store. Run a scan first.)
+{% else %}
+📋 *QuanterBack Scan Brief* — {{ now }}
+Mode: {{ mode }}  ·  Tickers: {{ n_processed }}  ·  Errors: {{ n_errors }}
+Trigger: {{ trigger_label }}
+Market: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: {{ wl_total }} (config:{{ wl_counts.config }}, user:{{ wl_counts.user }}, auto:{{ wl_counts.auto }})
+
+{% if buys %}═══ 🟢 *BUY* ({{ buys | length }}) ═══
+{% for b in buys %}
+*{{ b.ticker }}* — {{ b.strategy }}  conf {{ '%.2f' | format(b.confidence) }}{% if b.size_info %}  {{ b.size_info }}{% endif %}
+  Signals: {% if b.trend %}trend {{ b.trend }}{% endif %}{% if b.rsi %}  RSI {{ b.rsi | int }}{% endif %}{% if b.macd_signal %}  MACD {{ b.macd_signal }}{% endif %}{% if b.vol_regime %}  vol {{ b.vol_regime }}{% endif %}
+{% if b.insider_n_buys or b.insider_n_sells %}  Insider 30d: {{ b.insider_n_buys | default(0) }} buy{% if b.insider_total_buy_usd %} (${{ (b.insider_total_buy_usd / 1000000) | int }}M){% endif %} / {{ b.insider_n_sells | default(0) }} sell
+{% endif %}
+{% if b.analyst_actions_count %}  Analyst 14d: {{ b.analyst_summary }}
+{% endif %}
+{% if b.short_pct %}  Short: {{ '%.1f' | format(b.short_pct * 100) }}% float{% endif %}{% if b.eps_growth_q_yoy %}  ·  EPS Q YoY {{ '%+.0f' | format(b.eps_growth_q_yoy * 100) }}%{% endif %}
+{% if b.days_to_earnings is not none %}  Earnings: {{ b.days_to_earnings }}d away{% endif %}{% if b.news_sentiment is not none %}  ·  News sentiment: {{ '%+.2f' | format(b.news_sentiment) }}{% endif %}
+{% if b.top_news_title %}  News: "{{ b.top_news_title | truncate(80, True, '...') }}"
+{% endif %}
+{% if b.risk_info %}  {{ b.risk_info }}
+{% endif %}
+  > {{ b.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate %}
+  Agent debate:
+{% if b.agent_debate.fundamentalist %}
+    🔵 Fundamentalist ({{ b.agent_debate.fundamentalist.lean }} {{ '%.2f' | format(b.agent_debate.fundamentalist.confidence) }}): {{ b.agent_debate.fundamentalist.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.fundamentalist.key_points %}      • {{ b.agent_debate.fundamentalist.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% if b.agent_debate.technician %}
+    📊 Technician ({{ b.agent_debate.technician.lean }} {{ '%.2f' | format(b.agent_debate.technician.confidence) }}): {{ b.agent_debate.technician.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.technician.key_points %}      • {{ b.agent_debate.technician.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% if b.agent_debate.sentiment %}
+    💬 Sentiment ({{ b.agent_debate.sentiment.lean }} {{ '%.2f' | format(b.agent_debate.sentiment.confidence) }}): {{ b.agent_debate.sentiment.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.sentiment.key_points %}      • {{ b.agent_debate.sentiment.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if passes_notable %}═══ ⚪ *PASS* notable ({{ passes_notable | length }} of {{ passes_count }}) ═══
+{% for p in passes_notable %}
+{{ p.ticker }} — {% if p.trend %}{{ p.trend }}{% endif %}{% if p.rsi %}, RSI {{ p.rsi | int }}{% endif %}  · insufficient signal
+  > {{ p.rationale | truncate(120, True, '...') }}
+{% if p.agent_debate %}
+  Agent debate:
+{% if p.agent_debate.fundamentalist %}
+    🔵 Fundamentalist ({{ p.agent_debate.fundamentalist.lean }} {{ '%.2f' | format(p.agent_debate.fundamentalist.confidence) }}): {{ p.agent_debate.fundamentalist.rationale | truncate(200, True, '...') }}
+{% endif %}{% if p.agent_debate.technician %}
+    📊 Technician ({{ p.agent_debate.technician.lean }} {{ '%.2f' | format(p.agent_debate.technician.confidence) }}): {{ p.agent_debate.technician.rationale | truncate(200, True, '...') }}
+{% endif %}{% if p.agent_debate.sentiment %}
+    💬 Sentiment ({{ p.agent_debate.sentiment.lean }} {{ '%.2f' | format(p.agent_debate.sentiment.confidence) }}): {{ p.agent_debate.sentiment.rationale | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if rejects %}═══ ❌ *REJ* ({{ rejects_count }}) ═══
+{% for r in rejects[:5] %}
+{{ r.ticker }} — {{ r.reason | humanize_reject | truncate(120, True, '...') }}
+{% endfor %}
+{% if rejects_count > 5 %}... and {{ rejects_count - 5 }} more
+{% endif %}
+
+{% endif %}
+{% if auto_promoted or auto_demoted %}═══ 🤖 *Auto-watchlist* ═══
+{% for s in auto_promoted %}+{{ s }}
+{% endfor %}
+{% for s in auto_demoted %}-{{ s }}
+{% endfor %}
+{% endif %}
+{% endif %}

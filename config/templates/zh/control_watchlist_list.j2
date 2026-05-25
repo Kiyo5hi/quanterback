@@ -1,0 +1,4 @@
+📋 监视列表 (共 *{{ entries | length }}* 个股票):
+{% for entry in entries %}
+• `{{ entry.ticker }}` ({{ entry.source }}{{ ', ' + entry.notes if entry.notes else '' }})
+{% endfor %}

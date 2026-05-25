@@ -1,0 +1,61 @@
+# QuanterBack Local Configuration
+# Copy this to config/quanterback.local.toml and fill in your credentials.
+# This file is gitignored — never commit secrets.
+
+[llm]
+# Claude API key from https://console.anthropic.com/
+anthropic_api_key = "YOUR_ANTHROPIC_API_KEY_HERE"
+
+# Or, if using Ark as LLM provider:
+# Set provider = "ark" in quanterback.toml, then:
+# ark_api_key = "YOUR_ARK_API_KEY_HERE"
+
+[alpaca]
+# Get these from https://app.alpaca.markets/
+# In the dashboard: Account > API Keys > Create Key
+api_key = "YOUR_ALPACA_API_KEY_HERE"
+secret = "YOUR_ALPACA_SECRET_HERE"
+
+[telegram]
+# Get from BotFather on Telegram:
+# /newbot, follow prompts, copy the HTTP API token
+bot_token = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+
+# Your personal Telegram chat ID (get from /whoami on @userinfobot or similar)
+# For multiple users, use a list: chat_ids = [123456789, 987654321]
+chat_ids = [YOUR_TELEGRAM_CHAT_ID_HERE]
+
+# Optional overrides (uncomment to use non-default values)
+# See config/quanterback.toml for full list of settings
+
+# [market]
+# benchmark_ticker = "SPY"
+
+# [position]
+# position_size_pct = 0.03
+# max_concurrent_positions = 3
+
+# [risk.sl_tp]
+# sl_atr_multiple = 2.0
+# tp_atr_multiple = 2.5
+# trail_percent = 5.0
+
+# [risk.pdt]
+# enabled = true  # Protect against PDT if equity < $25k
+# min_equity = 25000.0
+# max_day_trades = 3
+
+# [llm]
+# model = "claude-opus-4-6"  # Use Opus for more complex analysis
+# temperature = 0.2
+# thinking_effort = "low"  # "off" / "low" / "medium" / "high"
+# strategist_mode = "single"  # "single" or "multi_agent"
+# agent_parallel = false  # Run agents sequentially (cheaper, slower)
+
+# [approval]
+# gate = "telegram"  # Require /yes from Telegram before BUY orders
+# timeout_seconds = 120
+
+# [language]
+# Set language for agent prompts + Telegram responses
+# language = "zh"  # Chinese; default "en" for English

@@ -1,0 +1,71 @@
+================================================================================
+QuanterBack Report
+================================================================================
+
+System state:
+  Mode:               {{ system_mode }}
+  Mode changed at:    {{ mode_changed_at }}
+  Mode changed by:    {{ mode_changed_by }}
+  Generated at:       {{ now_iso }}
+
+Summary:
+  Open positions:     {{ open_positions_count }}
+  Backtests run:      {{ backtests_count }}
+  Orders:             {{ orders_count }}
+
+================================================================================
+Last 10 scan_runs
+================================================================================
+{% for s in scan_runs[:10] %}
+  [#{{ s.id }}] {{ s.started }} — {{ s.ended }} ({{ s.duration }}s)
+    Source:     {{ s.source }}
+    Tickers:    {{ s.tickers_processed }}
+    Errors:     {{ s.errors_count }}
+{% endfor %}
+
+================================================================================
+Last 20 decisions
+================================================================================
+{% for d in decisions[:20] %}
+  {{ d.ts }}: {{ d.ticker }} — {{ d.action }} ({{ d.conf }})
+    {{ d.rationale_short[:70] }}
+{% endfor %}
+
+================================================================================
+Decisions by action
+================================================================================
+{% for action, count, pct in action_dist %}
+  {{ action }}: {{ count }} ({{ pct }}%)
+{% endfor %}
+
+================================================================================
+Reasons for skipping (last 100, top 5)
+================================================================================
+{% for r in rejection_reasons %}
+  {{ r.reason }}: {{ r.count }}
+{% endfor %}
+
+================================================================================
+Open positions
+================================================================================
+{% if open_positions %}
+{% for p in open_positions %}
+  {{ p.ticker }}: {{ p.shares }} @ {{ p.entry_price }} ({{ p.current_price }})
+    SL: {{ p.stop_loss }}  TP: {{ p.take_profit }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Recent notification failures
+================================================================================
+{% if notification_failures %}
+{% for n in notification_failures[:10] %}
+  {{ n.ts }}: {{ n.channel }} — {{ n.error[:80] }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================

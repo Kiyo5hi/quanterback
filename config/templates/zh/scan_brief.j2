@@ -1,0 +1,72 @@
+{% if error == "no_scan" %}
+(暂无扫描记录。先跑一次 scan。)
+{% else %}
+📋 *QuanterBack 扫描简报* — {{ now }}
+模式: {{ mode }}  ·  标的: {{ n_processed }}  ·  错误: {{ n_errors }}
+触发: {{ trigger_label }}
+大盘: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: {{ wl_total }} (配置:{{ wl_counts.config }}, 用户:{{ wl_counts.user }}, 自动:{{ wl_counts.auto }})
+
+{% if buys %}═══ 🟢 *BUY* ({{ buys | length }}) ═══
+{% for b in buys %}
+*{{ b.ticker }}* — {{ b.strategy }}  信心 {{ '%.2f' | format(b.confidence) }}{% if b.size_info %}  {{ b.size_info }}{% endif %}
+  信号: {% if b.trend %}趋势 {{ b.trend }}{% endif %}{% if b.rsi %}  RSI {{ b.rsi | int }}{% endif %}{% if b.macd_signal %}  MACD {{ b.macd_signal }}{% endif %}{% if b.vol_regime %}  波动 {{ b.vol_regime }}{% endif %}
+{% if b.insider_n_buys or b.insider_n_sells %}  内部 30d: {{ b.insider_n_buys | default(0) }} 买{% if b.insider_total_buy_usd %} (${{ (b.insider_total_buy_usd / 1000000) | int }}M){% endif %} / {{ b.insider_n_sells | default(0) }} 卖
+{% endif %}
+{% if b.analyst_actions_count %}  分析师 14d: {{ b.analyst_summary }}
+{% endif %}
+{% if b.short_pct %}  空头: {{ '%.1f' | format(b.short_pct * 100) }}% 流通{% endif %}{% if b.eps_growth_q_yoy %}  ·  EPS Q YoY {{ '%+.0f' | format(b.eps_growth_q_yoy * 100) }}%{% endif %}
+{% if b.days_to_earnings is not none %}  财报: {{ b.days_to_earnings }}d 后{% endif %}{% if b.news_sentiment is not none %}  ·  新闻情绪: {{ '%+.2f' | format(b.news_sentiment) }}{% endif %}
+{% if b.top_news_title %}  新闻: "{{ b.top_news_title | truncate(80, True, '...') }}"
+{% endif %}
+{% if b.risk_info %}  {{ b.risk_info }}
+{% endif %}
+  > {{ b.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate %}
+  分析师观点:
+{% if b.agent_debate.fundamentalist %}
+    🔵 基本面 ({{ b.agent_debate.fundamentalist.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(b.agent_debate.fundamentalist.confidence) }}): {{ b.agent_debate.fundamentalist.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.fundamentalist.key_points %}      • {{ b.agent_debate.fundamentalist.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% if b.agent_debate.technician %}
+    📊 技术面 ({{ b.agent_debate.technician.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(b.agent_debate.technician.confidence) }}): {{ b.agent_debate.technician.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.technician.key_points %}      • {{ b.agent_debate.technician.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% if b.agent_debate.sentiment %}
+    💬 情绪面 ({{ b.agent_debate.sentiment.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(b.agent_debate.sentiment.confidence) }}): {{ b.agent_debate.sentiment.rationale | truncate(200, True, '...') }}
+{% if b.agent_debate.sentiment.key_points %}      • {{ b.agent_debate.sentiment.key_points | join(' · ') | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if passes_notable %}═══ ⚪ *PASS* 关注 ({{ passes_notable | length }} / 共 {{ passes_count }}) ═══
+{% for p in passes_notable %}
+{{ p.ticker }} — {% if p.trend %}{{ p.trend }}{% endif %}{% if p.rsi %}, RSI {{ p.rsi | int }}{% endif %}  · 信号不足
+  > {{ p.rationale | truncate(120, True, '...') }}
+{% if p.agent_debate %}
+  分析师观点:
+{% if p.agent_debate.fundamentalist %}
+    🔵 基本面 ({{ p.agent_debate.fundamentalist.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(p.agent_debate.fundamentalist.confidence) }}): {{ p.agent_debate.fundamentalist.rationale | truncate(200, True, '...') }}
+{% endif %}{% if p.agent_debate.technician %}
+    📊 技术面 ({{ p.agent_debate.technician.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(p.agent_debate.technician.confidence) }}): {{ p.agent_debate.technician.rationale | truncate(200, True, '...') }}
+{% endif %}{% if p.agent_debate.sentiment %}
+    💬 情绪面 ({{ p.agent_debate.sentiment.lean | replace('bullish', '看涨') | replace('bearish', '看跌') | replace('neutral', '中立') }} {{ '%.2f' | format(p.agent_debate.sentiment.confidence) }}): {{ p.agent_debate.sentiment.rationale | truncate(200, True, '...') }}
+{% endif %}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if rejects %}═══ ❌ *REJ* ({{ rejects_count }}) ═══
+{% for r in rejects[:5] %}
+{{ r.ticker }} — {{ r.reason | humanize_reject | truncate(120, True, '...') }}
+{% endfor %}
+{% if rejects_count > 5 %}... 及另外 {{ rejects_count - 5 }} 个
+{% endif %}
+
+{% endif %}
+{% if auto_promoted or auto_demoted %}═══ 🤖 *自动 Watchlist* ═══
+{% for s in auto_promoted %}+{{ s }}
+{% endfor %}
+{% for s in auto_demoted %}-{{ s }}
+{% endfor %}
+{% endif %}
+{% endif %}

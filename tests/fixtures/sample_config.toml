@@ -1,0 +1,5 @@
+[position]
+position_size_pct = 0.03
+
+[llm]
+model = "claude-sonnet-4-6"

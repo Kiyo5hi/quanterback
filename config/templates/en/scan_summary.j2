@@ -1,0 +1,49 @@
+📋 *Scan complete* — {{ timestamp }}
+Tickers: *{{ processed }}*  Errors: *{{ errors }}*  Mode: {{ mode_text }}
+
+{% if orders_submitted %}
+🟢 *Orders submitted* ({{ orders_submitted | length }}):
+{% for o in orders_submitted %}
+  • *{{ o.ticker }}* — `{{ o.order_id[:12] }}…`
+{% endfor %}
+
+{% endif %}
+{% if dry_run_orders %}
+🟡 *Dry-run orders* ({{ dry_run_orders | length }}):
+{% for o in dry_run_orders %}
+  • {{ o.ticker }}
+{% endfor %}
+
+{% endif %}
+{% if backtests_passed %}
+✅ *Backtest passed* ({{ backtests_passed | length }}): {{ backtests_passed | join(", ") }}
+
+{% endif %}
+{% if backtests_failed %}
+❌ *Risk gate rejected* ({{ backtests_failed | length }}):
+{% for b in backtests_failed %}
+  • *{{ b.ticker }}* — {{ b.failed_checks | humanize_checks if b.failed_checks else "—" }}
+{% endfor %}
+
+{% endif %}
+{% if buys %}
+📈 *LLM BUY* ({{ buys | length }}): {{ buys | join(", ") }}
+
+{% endif %}
+{% if passes %}
+⚪ *LLM PASS* ({{ passes | length }}): {{ passes | join(", ") | truncate(200, True, "...") }}
+
+{% endif %}
+{% if rejected %}
+🚫 *Rejected* ({{ rejected | length }}):
+{% for r in rejected[:5] %}
+  • {{ r.ticker }} — {{ r.reason[:60] }}
+{% endfor %}
+
+{% endif %}
+{% if errors_list %}
+⚠️ *Errors* ({{ errors_list | length }}):
+{% for e in errors_list[:5] %}
+  • *{{ e.ticker }}*: {{ e.error[:100] }}
+{% endfor %}
+{% endif %}

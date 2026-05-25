@@ -1,0 +1,34 @@
+================================================================================
+QuanterBack 校准 — LLM 信心 vs 实际胜率
+{% if filter_days %}筛选: 最近 {{ filter_days }} 天{% endif %}
+================================================================================
+{% if error == "no_data" %}
+(暂无已平仓的 BUY 决策。可能 paper trading 还没产生 trade，或者 decision→trade 链路
+未完整连接。运行 scan + 等 SL/TP 触发。注：decision→trade 链路需要 position_tracker
+在 PersistedPosition schema 中存储 entry_order_id。)
+{% elif error == "replay_not_implemented" %}
+(尚未支持基于 replay 的校准；合成交易未持久化)
+{% else %}
+概览
+----
+  决策数:           {{ headline.n }}
+  胜数:             {{ headline.wins }}
+  实际胜率:         {{ headline.empirical_win_rate * 100 }}%
+  自报均信心:       {{ headline.avg_confidence * 100 }}%
+  校准误差:         {{ headline.calibration_gap * 100 }}%  (正 = 偏保守)
+  Brier 分数:       {{ headline.brier_score }}  (越低越好；0.25 = 等于乱猜)
+
+================================================================================
+信心分桶 (宽度={{ bucket_width }})
+================================================================================
+{% for b in diagram %}
+  {{ '%.1f' | format(b.lo) }}-{{ '%.1f' | format(b.hi) }}  [{{ b.bar }}] [n={{ '%3d' | format(b.n) }}]  {{ b.label }}{% if b.n %}  误差={{ '%+.3f' | format(b.gap) }}{% endif %}
+{% endfor %}
+
+图例: █ = 实际胜率, baseline = 对角线目标 (完美校准)
+
+================================================================================
+建议
+================================================================================
+  {{ recommendation }}
+{% endif %}

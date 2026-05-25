@@ -1,0 +1,49 @@
+📋 *扫描完成* — {{ timestamp }}
+处理: *{{ processed }}*  错误: *{{ errors }}*  模式: {{ mode_text }}
+
+{% if orders_submitted %}
+🟢 *已提交订单* ({{ orders_submitted | length }}):
+{% for o in orders_submitted %}
+  • *{{ o.ticker }}* — `{{ o.order_id[:12] }}…`
+{% endfor %}
+
+{% endif %}
+{% if dry_run_orders %}
+🟡 *Dry-run 订单* ({{ dry_run_orders | length }}):
+{% for o in dry_run_orders %}
+  • {{ o.ticker }}
+{% endfor %}
+
+{% endif %}
+{% if backtests_passed %}
+✅ *回测通过* ({{ backtests_passed | length }}): {{ backtests_passed | join(", ") }}
+
+{% endif %}
+{% if backtests_failed %}
+❌ *风控护栏拒绝* ({{ backtests_failed | length }}):
+{% for b in backtests_failed %}
+  • *{{ b.ticker }}* — {{ b.failed_checks | humanize_checks if b.failed_checks else "—" }}
+{% endfor %}
+
+{% endif %}
+{% if buys %}
+📈 *LLM 看涨* ({{ buys | length }}): {{ buys | join(", ") }}
+
+{% endif %}
+{% if passes %}
+⚪ *LLM 跳过* ({{ passes | length }}): {{ passes | join(", ") | truncate(200, True, "...") }}
+
+{% endif %}
+{% if rejected %}
+🚫 *已拒绝* ({{ rejected | length }}):
+{% for r in rejected[:5] %}
+  • {{ r.ticker }} — {{ r.reason[:60] }}
+{% endfor %}
+
+{% endif %}
+{% if errors_list %}
+⚠️ *错误* ({{ errors_list | length }}):
+{% for e in errors_list[:5] %}
+  • *{{ e.ticker }}*: {{ e.error[:100] }}
+{% endfor %}
+{% endif %}

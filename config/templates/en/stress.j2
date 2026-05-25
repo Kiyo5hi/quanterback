@@ -1,0 +1,24 @@
+================================================================================
+QuanterBack Stress Test — {{ n_windows }} regime windows
+================================================================================
+
+{% for r in rows %}
+{{ r.window_name }}
+  Decisions: {{ r.n_decisions }}  BUYs: {{ r.n_buys }} ({{ '%.1f' | format(r.n_buys / r.n_decisions * 100 if r.n_decisions else 0) }}%)
+  Synthetic trades: {{ r.n_trades }}
+{% if r.n_trades > 0 %}
+  Win rate:  {{ r.win_rate_pct }}%
+  P&L:       ${{ r.total_pnl_usd }}
+  Sharpe:    {{ r.trade_sharpe }}
+  Max DD:    ${{ r.max_drawdown_usd }}
+{% else %}
+  (no synthetic trades in this window)
+{% endif %}
+
+{% endfor %}
+================================================================================
+Summary table
+================================================================================
+{% for r in rows %}
+  {{ '%-30s' | format(r.window_name) }} BUY={{ '%2d' | format(r.n_buys) }}/{{ '%-3d' | format(r.n_decisions) }} Win={{ '%5.1f' | format(r.win_rate_pct) }}% P&L=${{ '%8.2f' | format(r.total_pnl_usd) }} Sharpe={{ '%6.3f' | format(r.trade_sharpe) }} MaxDD=${{ '%7.2f' | format(r.max_drawdown_usd) }}
+{% endfor %}

@@ -1,0 +1,5 @@
+{% if pnl_usd >= 0 %}✅{% else %}❌{% endif %} *Position closed* — *{{ ticker }}*
+Reason: {{ exit_reason | exit_reason }}
+{{ qty }} shares: ${{ entry_price|round(2) }} → ${{ exit_price|round(2) }}
+P&L: *${{ pnl_usd }}* ({{ pnl_pct }}%)
+Held: {{ holding_hours }}h

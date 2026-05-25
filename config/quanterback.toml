@@ -1,0 +1,110 @@
+[scan]
+watchlist_path = "/config/watchlist.txt"
+
+[market]
+# Broad-market ETF used for trend context, relative-strength (RS) calc,
+# and buy-and-hold benchmark. VOO = Vanguard S&P 500 (expense 0.03%).
+# Alternatives: SPY (0.0945%), IVV (0.03%), VTI (Total Market 0.03%),
+# QQQ (Nasdaq-100 — different exposure).
+benchmark_ticker = "VOO"
+
+[universe]
+# Auto-screener picks top-N tickers from this file by composite momentum
+# score each scan. Set enabled=false to disable.
+enabled = true
+path = "/config/universe.txt"
+top_n = 10
+# Dynamic top_n based on SPY regime (bullish/neutral/bearish)
+dynamic_top_n = false
+top_n_bullish = 15
+top_n_neutral = 10
+top_n_bearish = 5
+
+[position]
+position_size_pct = 0.05
+max_concurrent_positions = 5
+
+[risk.sl_tp]
+sl_atr_multiple = 1.5
+tp_atr_multiple = 3.0
+# Trailing stop sell submitted alongside the Bracket Order. Lets winners
+# run beyond the fixed TP. Comment out to disable.
+# Trail percent for trailing stops (used by future position_management agent
+# only — bracket orders use static stop_loss, this is informational).
+# Value is decimal: 0.08 = 8%, NOT 0.08%.
+trail_percent = 0.08
+
+[risk.thresholds]
+# These are SANITY CAPS — real evaluation is relative + OOS in CompositeRiskGate.
+max_drawdown = 0.50
+min_sharpe = -0.5
+min_win_rate = 0.0
+min_profit_factor = 0.0
+min_num_trades = 5
+
+[risk.sector]
+# Reject BUY when this many positions in the same sector are already open.
+# Prevents over-concentration (e.g., NVDA+AMD+ARM = one AI-semi bet not three).
+enabled = true
+max_per_sector = 2
+
+[risk.pdt]
+# Pattern Day Trader protection. Off by default — paper trading is
+# unaffected by FINRA PDT. Enable for live accounts with equity < $25k
+# to prevent the 4th day trade in 5 business days that triggers a
+# 90-day lockout.
+enabled = false
+min_equity = 25000.0
+max_day_trades = 3
+
+[backtest]
+lookback_years = 3
+
+[llm]
+provider = "claude"
+model = "claude-sonnet-4-6"
+temperature = 0.0
+# Reasoning depth for thinking-enabled models. "off" = no thinking,
+# "low"/"medium"/"high" enable progressively more chain-of-thought budget
+# (Claude only; Ark thinking is binary on/off but accepts the same setting).
+# Note: not all models support thinking — doubao-seed-lite/doubao-pro don't,
+# doubao-1-5-thinking-pro/deepseek-r1/claude-* do.
+thinking_effort = "off"
+prompt_template_path = "/config/prompts/momentum_strategist.md"
+# Strategist mode: "single" (legacy PromptedLLMStrategist) or "multi_agent" (4-agent TradingAgents pattern)
+strategist_mode = "multi_agent"
+# Directory containing agent prompt templates (used by multi_agent mode)
+prompts_dir = "/config/prompts"
+# Whether to run analyst agents in parallel (faster wall-clock, costs 4x LLM calls)
+agent_parallel = true
+# anthropic_api_key = ""  # only used when provider=claude; set in local.toml or ANTHROPIC_API_KEY env
+# ark_api_key = ""        # only used when provider=ark; set in local.toml or ARK_API_KEY env
+
+[alpaca]
+# api_key = ""      # set in local.toml or ALPACA_API_KEY env
+# secret = ""       # set in local.toml or ALPACA_SECRET env
+
+[data]
+cache_dir = "/data/cache"
+cache_ttl_hours = 4
+
+[telegram]
+chat_ids = []
+retry_window_hours = 1
+# bot_token = ""    # set in local.toml or TELEGRAM_BOT_TOKEN env
+
+[approval]
+# "noop" = NoOpApprovalGate (always approve, v0 default)
+# "telegram" = TelegramApprovalGate (requires /yes from TG before BUY)
+gate = "noop"
+timeout_seconds = 60
+
+[storage]
+db_path = "/data/quanterback.sqlite"
+
+[i18n]
+# Global language for all user-facing text (TG bot replies, aggregated
+# scan notifications, `quanterback report` output, etc.).
+# Values: "en" or "zh".
+language = "en"
+templates_dir = "/config/templates"

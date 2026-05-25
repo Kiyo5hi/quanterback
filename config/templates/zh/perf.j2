@@ -1,0 +1,88 @@
+================================================================================
+QuanterBack 绩效 — 生成于 {{ now }}
+{% if filter_days %}筛选: 最近 {{ filter_days }} 天{% endif %}
+{% if filter_ticker %}筛选: 代码 = {{ filter_ticker }}{% endif %}
+================================================================================
+
+{% if total_count == 0 %}
+(暂无已平仓交易可分析。)
+{% else %}
+概览
+----
+  总交易数:           {{ headline.n }}
+  胜率:               {{ headline.win_rate_pct }}%  ({{ headline.wins }} 胜 / {{ headline.losses }} 负)
+  总盈亏:             ${{ headline.total_pnl_usd }}
+  单笔均盈亏:         ${{ headline.avg_pnl_usd }} ({{ headline.avg_pnl_pct }}%)
+  最佳:               {{ headline.best_ticker }} +{{ headline.best_pnl_pct }}%
+  最差:               {{ headline.worst_ticker }} {{ headline.worst_pnl_pct }}%
+
+================================================================================
+按退出原因
+================================================================================
+{% if by_exit_reason %}
+{% for r in by_exit_reason %}
+  {{ r.reason | exit_reason_zh }}: {{ r.n }} 笔, 胜率={{ r.win_rate_pct }}%, 均={{ r.avg_pnl_pct }}%, 总=${{ r.total_pnl_usd }}
+{% endfor %}
+{% else %}
+  (无)
+{% endif %}
+
+================================================================================
+赚钱榜 (按总盈亏)
+================================================================================
+{% if top_winners %}
+{% for w in top_winners %}
+  {{ w.ticker }}: {{ w.n }} 笔, 胜率={{ w.win_rate_pct }}%, 总=${{ w.total_pnl_usd }}, 均={{ w.avg_pnl_pct }}%
+{% endfor %}
+{% else %}
+  (无)
+{% endif %}
+
+================================================================================
+亏钱榜 (按总盈亏)
+================================================================================
+{% if bottom_losers %}
+{% for l in bottom_losers %}
+  {{ l.ticker }}: {{ l.n }} 笔, 胜率={{ l.win_rate_pct }}%, 总=${{ l.total_pnl_usd }}, 均={{ l.avg_pnl_pct }}%
+{% endfor %}
+{% else %}
+  (无)
+{% endif %}
+
+================================================================================
+按持有时长
+================================================================================
+{% if by_holding %}
+{% for h in by_holding %}
+  {{ h.bucket }}: {{ h.n }} 笔, 胜率={{ h.win_rate_pct }}%, 均={{ h.avg_pnl_pct }}%
+{% endfor %}
+{% else %}
+  (无)
+{% endif %}
+
+================================================================================
+净值曲线 (最近 30 笔)
+================================================================================
+{% if equity_curve %}
+{% for e in equity_curve %}
+  {{ e.date }}  {{ e.ticker }}  {{ e.exit_reason | exit_reason_zh }}  {{ e.pnl_pct }}%  → ${{ e.cumulative_usd }}
+{% endfor %}
+{% else %}
+  (无)
+{% endif %}
+
+================================================================================
+连胜/连败
+================================================================================
+  最长连胜: {{ streaks.longest_win }}
+  最长连败: {{ streaks.longest_loss }}
+  当前:     {{ streaks.current_kind }} × {{ streaks.current_run }}
+
+================================================================================
+风险调整收益
+================================================================================
+  单笔 Sharpe:   {{ risk_adjusted.trade_sharpe }}
+  最大回撤:     ${{ risk_adjusted.max_drawdown_usd }} ({{ risk_adjusted.max_drawdown_pct }}%{% if risk_adjusted.dd_pct_is_capped is defined and risk_adjusted.dd_pct_is_capped %}，已上限 100%{% endif %})
+{% if risk_adjusted.peak_equity_usd is defined and risk_adjusted.peak_equity_usd > 0 %}  最大回撤时净值:  ${{ risk_adjusted.peak_equity_usd }}
+{% endif %}
+{% endif %}

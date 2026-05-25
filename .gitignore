@@ -1,0 +1,35 @@
+# Secrets — never commit
+config/quanterback.local.toml
+
+# Worktrees
+.worktrees/
+
+# CI/CD
+.github/workflows/cache/
+
+# Runtime data (mounted into containers)
+data/
+logs/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

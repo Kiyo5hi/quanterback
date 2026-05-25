@@ -1,0 +1,24 @@
+================================================================================
+QuanterBack 压力测试 — {{ n_windows }} 个市场窗口
+================================================================================
+
+{% for r in rows %}
+{{ r.window_name }}
+  决策数: {{ r.n_decisions }}  BUY 数: {{ r.n_buys }} ({{ '%.1f' | format(r.n_buys / r.n_decisions * 100 if r.n_decisions else 0) }}%)
+  合成交易: {{ r.n_trades }}
+{% if r.n_trades > 0 %}
+  胜率:     {{ r.win_rate_pct }}%
+  盈亏:     ${{ r.total_pnl_usd }}
+  Sharpe:   {{ r.trade_sharpe }}
+  最大回撤: ${{ r.max_drawdown_usd }}
+{% else %}
+  (该窗口未产生合成交易)
+{% endif %}
+
+{% endfor %}
+================================================================================
+汇总
+================================================================================
+{% for r in rows %}
+  {{ '%-30s' | format(r.window_name) }} BUY={{ '%2d' | format(r.n_buys) }}/{{ '%-3d' | format(r.n_decisions) }} 胜={{ '%5.1f' | format(r.win_rate_pct) }}% P&L=${{ '%8.2f' | format(r.total_pnl_usd) }} Sharpe={{ '%6.3f' | format(r.trade_sharpe) }} MaxDD=${{ '%7.2f' | format(r.max_drawdown_usd) }}
+{% endfor %}

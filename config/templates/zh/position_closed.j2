@@ -1,0 +1,5 @@
+{% if pnl_usd >= 0 %}✅{% else %}❌{% endif %} *持仓关闭* — *{{ ticker }}*
+原因: {{ exit_reason | exit_reason }}
+{{ qty }} 股: ${{ entry_price|round(2) }} → ${{ exit_price|round(2) }}
+盈亏: *${{ pnl_usd }}* ({{ pnl_pct }}%)
+持有: {{ holding_hours }} 小时

@@ -1,0 +1,4 @@
+📋 Watchlist (*{{ entries | length }}* ticker{{ 's' if entries | length != 1 else '' }}):
+{% for entry in entries %}
+• `{{ entry.ticker }}` ({{ entry.source }}{{ ', ' + entry.notes if entry.notes else '' }})
+{% endfor %}

@@ -1,0 +1,35 @@
+================================================================================
+QuanterBack Calibration — LLM confidence vs realized outcomes
+{% if filter_days %}Filter: last {{ filter_days }} days{% endif %}
+================================================================================
+{% if error == "no_data" %}
+(No BUY decisions with linked closed trades yet. Either paper trading
+hasn't accumulated trades, or the decision→trade link isn't fully wired.
+Run scan + wait for SL/TP to fire. Note: decision→trade link requires
+position_tracker to store entry_order_id in PersistedPosition schema.)
+{% elif error == "replay_not_implemented" %}
+(replay-source calibration not yet implemented; trades aren't persisted)
+{% else %}
+Headline
+--------
+  Decisions analyzed:  {{ headline.n }}
+  Wins:                {{ headline.wins }}
+  Empirical win rate:  {{ headline.empirical_win_rate * 100 }}%
+  Avg self-confidence: {{ headline.avg_confidence * 100 }}%
+  Calibration gap:     {{ headline.calibration_gap * 100 }}%  (positive = under-confident)
+  Brier score:         {{ headline.brier_score }}  (lower better; 0.25 = no skill)
+
+================================================================================
+Calibration buckets (width={{ bucket_width }})
+================================================================================
+{% for b in diagram %}
+  {{ '%.1f' | format(b.lo) }}-{{ '%.1f' | format(b.hi) }}  [{{ b.bar }}] [n={{ '%3d' | format(b.n) }}]  {{ b.label }}{% if b.n %}  gap={{ '%+.3f' | format(b.gap) }}{% endif %}
+{% endfor %}
+
+Legend: █ = empirical win rate, baseline = diagonal target
+
+================================================================================
+Recommendation
+================================================================================
+  {{ recommendation }}
+{% endif %}

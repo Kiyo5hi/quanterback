@@ -1,0 +1,65 @@
+================================================================================
+QuanterBack Analyze — generated {{ now }}
+================================================================================
+
+Decision latency:
+  Median per ticker: {{ latency.median_s }}s
+  p95 per ticker:    {{ latency.p95_s }}s
+  Sample size:       {{ latency.n }} scans
+
+================================================================================
+Decision volume — last 7 days
+================================================================================
+{% if daily_volume %}
+{% for d in daily_volume %}
+  {{ d.date }}: {{ d.n }} decisions
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Action distribution by week — last 4 weeks
+================================================================================
+{% if weekly_dist %}
+{% for w in weekly_dist %}
+  {{ w.week }}  PASS={{ w.PASS }}  BUY={{ w.BUY }}  REJ={{ w.REJ }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Top PASS tickers (last 1000 decisions)
+================================================================================
+{% if pass_top %}
+{% for p in pass_top %}
+  {{ p.ticker }} ({{ p.n }}×)
+    Latest: {{ p.snippet | truncate(110, True, '...') }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Top BUY tickers (last 1000 decisions)
+================================================================================
+{% if buy_top %}
+{% for b in buy_top %}
+  {{ b.ticker }} ({{ b.n }}×)
+    Latest: {{ b.snippet | truncate(110, True, '...') }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
+
+================================================================================
+Risk-gate rejections (last 200 failed backtests)
+================================================================================
+{% if rejection_counts %}
+{% for r in rejection_counts %}
+  {{ r.count }}× {{ r.check }}
+{% endfor %}
+{% else %}
+  (none)
+{% endif %}
