@@ -160,6 +160,7 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         data_provider=data_provider,
         summarizer=summarizer,
         strategist=strategist,
+        llm_client=llm_client,
         approval_gate=approval_gate,
         position_state=position_state,
         backtester=backtester,

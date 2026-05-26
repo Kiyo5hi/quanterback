@@ -15,9 +15,10 @@ log = logging.getLogger(__name__)
 
 class PositionManagementDecision(BaseModel):
     """Output of position management agent analysis."""
-    action: str  # "HOLD" | "TIGHTEN_SL" | "EXIT_NOW"
+    action: str  # "HOLD" | "TIGHTEN_SL" | "TRIM_HALF" | "EXIT_NOW"
     ticker: str
     new_sl_price: float | None = None
+    new_qty_pct: float | None = None  # for TRIM_HALF: fraction to KEEP (0.5 = sell half)
     reasoning: str
     confidence: float
 

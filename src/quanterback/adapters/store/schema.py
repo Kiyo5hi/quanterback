@@ -127,6 +127,23 @@ CREATE TABLE IF NOT EXISTS watchlist (
   notes TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_source ON watchlist(source);
+
+CREATE TABLE IF NOT EXISTS position_management_decisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scan_run_id INTEGER NOT NULL REFERENCES scan_runs(id),
+  ticker TEXT NOT NULL,
+  action TEXT NOT NULL,
+  new_sl_price REAL,
+  new_qty_pct REAL,
+  reasoning TEXT,
+  confidence REAL,
+  applied INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pmd_scan_run
+  ON position_management_decisions(scan_run_id);
+CREATE INDEX IF NOT EXISTS idx_pmd_ticker
+  ON position_management_decisions(ticker);
 """
 
 

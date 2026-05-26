@@ -404,3 +404,30 @@ class SqliteStore:
         self._conn.execute(
             "UPDATE watchlist SET source=? WHERE ticker=?", (source, ticker)
         )
+
+    # --- position management decisions ---
+    def insert_position_management_decision(
+        self,
+        *,
+        scan_run_id: int,
+        ticker: str,
+        action: str,
+        new_sl_price: float | None,
+        new_qty_pct: float | None,
+        reasoning: str | None,
+        confidence: float | None,
+        applied: bool,
+    ) -> int:
+        """Persist a position management decision for audit + analytics."""
+        cur = self._conn.execute(
+            "INSERT INTO position_management_decisions "
+            "(scan_run_id, ticker, action, new_sl_price, new_qty_pct, reasoning, "
+            " confidence, applied, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                scan_run_id, ticker, action, new_sl_price, new_qty_pct,
+                reasoning, confidence, 1 if applied else 0,
+                datetime.now(tz=timezone.utc).isoformat(),
+            ),
+        )
+        return int(cur.lastrowid or 0)

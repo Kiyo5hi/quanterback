@@ -26,7 +26,7 @@ from quanterback.interfaces.data import (
     NewsProvider,
     Summarizer,
 )
-from quanterback.interfaces.decision import ApprovalGate, LLMStrategist
+from quanterback.interfaces.decision import ApprovalGate, LLMClient, LLMStrategist
 from quanterback.interfaces.events import EventSource
 from quanterback.interfaces.execution import Executor
 from quanterback.interfaces.notify import Notifier
@@ -64,6 +64,7 @@ class ScanPipeline:
     fundamentals_provider: FundamentalsProvider | None = None
     watchlist_auto_manager: object | None = None
     config: object | None = None
+    llm_client: LLMClient | None = None
     _spy_closes: object = field(default=None, init=False, repr=False)
     _market_context: dict = field(default_factory=dict, init=False, repr=False)
     _effective_top_n: int = field(default=10, init=False, repr=False)
@@ -566,7 +567,7 @@ class ScanPipeline:
                          self._effective_top_n, self._market_context.get("spy_trend", "unknown"))
 
     def _run_position_management(self, run_id: int, dry_run: bool) -> None:
-        """Evaluate held positions and decide on HOLD/TIGHTEN_SL/EXIT actions.
+        """Evaluate held positions and decide on HOLD/TIGHTEN_SL/TRIM_HALF/EXIT actions.
 
         This runs after the entry scan to re-evaluate existing positions.
         """
@@ -583,16 +584,31 @@ class ScanPipeline:
             log.info("No open positions for management.")
             return
 
+        if self.llm_client is None:
+            log.warning(
+                "Position management requires llm_client but it was not wired; "
+                "skipping. Set ScanPipeline(llm_client=...) at wire time."
+            )
+            return
+
         min_age_hours = getattr(self.config, "position_management_min_age_hours", 6.0)
-        reeval_interval_hours = getattr(self.config, "position_management_reeval_interval_hours", 4.0)
         now = datetime.now(tz=timezone.utc)
 
-        # Initialize agent
+        # Initialize agent — IMPORTANT: pass the raw LLMClient, not the strategist.
+        # The strategist exposes decide(summary), not chat(messages).
         agent = PositionManagementAgent(
-            llm_client=self.strategist,  # Reuse strategist's LLM client
+            llm_client=self.llm_client,
             prompts_dir=getattr(self.config, "prompts_dir", Path("/config/prompts")),
             language=getattr(self.config, "language", "en"),
         )
+
+        # Snapshot persisted positions once so we can look up entry/sl/tp/qty per ticker.
+        try:
+            persisted_positions = self.state_store.get_open_positions()
+        except Exception as e:
+            log.warning("Failed to fetch persisted positions for management: %s", e)
+            persisted_positions = []
+        positions_by_ticker = {p.ticker: p for p in persisted_positions}
 
         for lifecycle in open_lifecycles:
             ticker = lifecycle.ticker
@@ -604,12 +620,15 @@ class ScanPipeline:
                              ticker, age_hours, min_age_hours)
                     continue
 
-                # TODO: check reeval interval (would need to store last_eval time)
-                # For now, evaluate all eligible positions
+                pos = positions_by_ticker.get(ticker)
+                if pos is None:
+                    # Closed between query_open_lifecycles and get_open_positions
+                    log.info("[%s] Position closed during management scan; skipping.", ticker)
+                    continue
 
                 # Fetch fresh data and summary
                 window = self.data_provider.fetch(ticker)
-                news = []
+                news: list = []
                 if self.news_provider is not None:
                     try:
                         news = self.news_provider.fetch_news(ticker)
@@ -626,19 +645,29 @@ class ScanPipeline:
                     kwargs["news"] = news
                 summary = self.summarizer.summarize(window, **kwargs)
 
-                # Build position context (would come from position tracker in prod)
-                # For now, minimal context
+                # Build position context from real PersistedPosition data.
+                current_price = (
+                    float(summary.price.last_close)
+                    if summary.price.last_close is not None else None
+                )
+                entry = float(pos.entry_price) if pos.entry_price else 0.0
+                unrealized_pnl_pct = (
+                    ((current_price - entry) / entry)
+                    if (current_price is not None and entry) else 0.0
+                )
                 position_context = {
                     "order_id": lifecycle.order_id,
+                    "ticker": ticker,
+                    "qty": pos.qty,
                     "days_held": age_hours / 24,
-                    "entry_price": None,  # Would fetch from PersistedPosition
-                    "current_price": float(summary.price.last_close) if summary.price.last_close else None,
-                    "unrealized_pnl_pct": 0.0,  # Would calculate from position tracker
-                    "current_sl": None,
-                    "current_tp": None,
+                    "entry_price": pos.entry_price,
+                    "current_price": current_price,
+                    "unrealized_pnl_pct": unrealized_pnl_pct,
+                    "current_sl": pos.sl,
+                    "current_tp": pos.tp,
                 }
 
-                # Run agent
+                # Run agent (real LLM call via self.llm_client)
                 decision = agent.evaluate(summary, position_context)
                 log.info(
                     "[%s/position_mgmt] action=%s reasoning=%s conf=%.2f",
@@ -646,6 +675,7 @@ class ScanPipeline:
                 )
 
                 # Apply decision
+                applied = False
                 if decision.action == "HOLD":
                     pass  # No action needed
                 elif decision.action == "TIGHTEN_SL":
@@ -653,15 +683,52 @@ class ScanPipeline:
                         success = self.executor.replace_stop_loss(ticker, decision.new_sl_price)
                         if success:
                             log.info("[%s] Tightened stop loss to %.2f", ticker, decision.new_sl_price)
+                            applied = True
                         else:
                             log.warning("[%s] Failed to tighten stop loss", ticker)
+                elif decision.action == "TRIM_HALF":
+                    if not dry_run and pos.qty:
+                        keep_pct = decision.new_qty_pct if decision.new_qty_pct is not None else 0.5
+                        # Clamp to [0,1] defensively.
+                        keep_pct = max(0.0, min(1.0, keep_pct))
+                        sell_qty = int(pos.qty * (1 - keep_pct))
+                        if sell_qty > 0:
+                            success = self.executor.trim_position(ticker, sell_qty)
+                            if success:
+                                log.info("[%s] Trimmed %d shares (keep %.0f%%)",
+                                         ticker, sell_qty, keep_pct * 100)
+                                applied = True
+                            else:
+                                log.warning("[%s] Failed to trim position", ticker)
+                        else:
+                            log.warning(
+                                "[%s] TRIM_HALF computed sell_qty=0 (qty=%s, keep=%.2f); skipping",
+                                ticker, pos.qty, keep_pct,
+                            )
                 elif decision.action == "EXIT_NOW":
                     if not dry_run:
                         success = self.executor.market_close(ticker)
                         if success:
                             log.info("[%s] Market closed (position management)", ticker)
+                            applied = True
                         else:
                             log.warning("[%s] Failed to market close", ticker)
+
+                # Persist every decision (HOLD too) for audit + calibration.
+                try:
+                    self.state_store.insert_position_management_decision(
+                        scan_run_id=run_id,
+                        ticker=ticker,
+                        action=decision.action,
+                        new_sl_price=decision.new_sl_price,
+                        new_qty_pct=decision.new_qty_pct,
+                        reasoning=decision.reasoning,
+                        confidence=decision.confidence,
+                        applied=applied,
+                    )
+                except Exception as e:
+                    log.warning("Failed to persist position_management_decision for %s: %s",
+                                ticker, e)
 
                 self._notify("position_management", {
                     "ticker": ticker,

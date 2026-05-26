@@ -98,3 +98,119 @@ def test_bracket_order_when_trail_percent_is_none(
     r = ex.submit(spec, dry_run=False)
     assert r.submitted
     assert len(fake_trading_client["orders"]) == 1
+
+
+# ---------------------- trim_position tests ----------------------
+
+
+@pytest.fixture()
+def fake_trading_client_with_orders(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Trading client fake that supports get_orders, cancel_order_by_id, submit_order."""
+    state: dict = {
+        "open_orders": [],
+        "cancelled": [],
+        "submitted_orders": [],
+    }
+
+    class FakeClient:
+        def __init__(self, api_key: str, secret_key: str, paper: bool) -> None:
+            self.api_key = api_key
+
+        def get_orders(self, filter=None):
+            return list(state["open_orders"])
+
+        def cancel_order_by_id(self, order_id: str):
+            state["cancelled"].append(order_id)
+            state["open_orders"] = [
+                o for o in state["open_orders"] if str(o.id) != order_id
+            ]
+
+        def submit_order(self, order_data):
+            state["submitted_orders"].append(order_data)
+            return SimpleNamespace(id="trim-1", status="accepted")
+
+        def get_account(self):
+            return SimpleNamespace(equity="100000", daytrade_count=0)
+
+    monkeypatch.setattr(
+        "quanterback.adapters.execution.alpaca_broker.TradingClient",
+        FakeClient,
+    )
+    # Avoid the real 1.5s settle delay in tests.
+    monkeypatch.setattr(
+        "quanterback.adapters.execution.alpaca_broker.time.sleep",
+        lambda _: None,
+    )
+    return state
+
+
+def _make_sell_order(order_id: str, ticker: str, qty: float) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=order_id, symbol=ticker, side="OrderSide.SELL", qty=qty,
+    )
+
+
+def test_trim_position_cancels_exit_leg_and_submits_market_sell(
+    fake_trading_client_with_orders: dict,
+) -> None:
+    """Happy path: trim cancels enough exit legs to free shares, then sells."""
+    # Open SELL legs: one for the full 10-share bracket
+    fake_trading_client_with_orders["open_orders"] = [
+        _make_sell_order("leg-tp", "AMD", 10),
+    ]
+    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ok = ex.trim_position("AMD", qty_to_sell=5)
+
+    assert ok is True
+    # The exit leg must have been cancelled.
+    assert "leg-tp" in fake_trading_client_with_orders["cancelled"]
+    # A market SELL for 5 shares must have been submitted.
+    assert len(fake_trading_client_with_orders["submitted_orders"]) == 1
+    submitted = fake_trading_client_with_orders["submitted_orders"][0]
+    assert submitted.symbol == "AMD"
+    assert submitted.qty == 5
+
+
+def test_trim_position_rejects_non_positive_qty(
+    fake_trading_client_with_orders: dict,
+) -> None:
+    """trim_position(qty=0) is a no-op returning False."""
+    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    assert ex.trim_position("AMD", qty_to_sell=0) is False
+    assert ex.trim_position("AMD", qty_to_sell=-3) is False
+    # No orders touched
+    assert fake_trading_client_with_orders["cancelled"] == []
+    assert fake_trading_client_with_orders["submitted_orders"] == []
+
+
+def test_trim_position_returns_false_on_broker_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If Alpaca client blows up, trim_position returns False (doesn't raise)."""
+    class BoomClient:
+        def __init__(self, *a, **kw) -> None: ...
+
+        def get_orders(self, filter=None):
+            raise RuntimeError("API down")
+
+    monkeypatch.setattr(
+        "quanterback.adapters.execution.alpaca_broker.TradingClient",
+        BoomClient,
+    )
+    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    assert ex.trim_position("AMD", qty_to_sell=5) is False
+
+
+def test_trim_position_only_cancels_legs_for_target_ticker(
+    fake_trading_client_with_orders: dict,
+) -> None:
+    """Sell legs for OTHER tickers must NOT be touched."""
+    fake_trading_client_with_orders["open_orders"] = [
+        _make_sell_order("amd-leg", "AMD", 10),
+        _make_sell_order("nvda-leg", "NVDA", 8),
+    ]
+    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex.trim_position("AMD", qty_to_sell=5)
+
+    assert "amd-leg" in fake_trading_client_with_orders["cancelled"]
+    assert "nvda-leg" not in fake_trading_client_with_orders["cancelled"]

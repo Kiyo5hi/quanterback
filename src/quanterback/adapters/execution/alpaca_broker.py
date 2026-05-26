@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -283,6 +284,56 @@ class AlpacaPaperBroker:
             return True
         except Exception as e:
             log.error("Failed to replace_stop_loss for %s: %s", ticker, e)
+            return False
+
+    def trim_position(self, ticker: str, qty_to_sell: int) -> bool:
+        """Partially close a position by qty.
+
+        Cancels bracket exit legs proportionally to free up enough shares,
+        then market-sells qty_to_sell. Remaining shares keep their bracket exit
+        leg (re-attached by a subsequent run if needed).
+
+        Returns True if the market-sell was submitted, False otherwise.
+        """
+        if qty_to_sell <= 0:
+            log.warning("trim_position called with non-positive qty=%s for %s",
+                        qty_to_sell, ticker)
+            return False
+        try:
+            # Find open SELL orders for this ticker (the bracket TP/SL legs)
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=200)
+            all_open = self._client.get_orders(filter=req)
+            sell_orders = [
+                o for o in all_open
+                if str(o.symbol) == ticker
+                and str(o.side).split(".")[-1].upper() == "SELL"
+            ]
+
+            # Free up at least qty_to_sell shares by cancelling exit legs.
+            freed = 0.0
+            for o in sell_orders:
+                if freed >= qty_to_sell:
+                    break
+                try:
+                    self._client.cancel_order_by_id(str(o.id))
+                    freed += float(o.qty or 0)
+                    log.info("Cancelled exit leg %s for trim (qty=%s)", o.id, o.qty)
+                except Exception as e:
+                    log.warning("Failed to cancel exit leg %s: %s", o.id, e)
+
+            # Brief settle delay so the broker frees the shares before SELL submit.
+            time.sleep(1.5)
+
+            order_req = MarketOrderRequest(
+                symbol=ticker, qty=qty_to_sell,
+                side=OrderSide.SELL, time_in_force=TimeInForce.DAY,
+            )
+            order = self._client.submit_order(order_req)
+            log.info("Trim order %s submitted: %s %s shares",
+                     order.id, ticker, qty_to_sell)
+            return True
+        except Exception as e:
+            log.exception("Failed to trim position %s: %s", ticker, e)
             return False
 
     def is_market_open(self) -> bool:
