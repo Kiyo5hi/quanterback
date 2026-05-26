@@ -33,7 +33,8 @@ chat_ids = [YOUR_TELEGRAM_CHAT_ID_HERE]
 
 # [position]
 # position_size_pct = 0.03
-# max_concurrent_positions = 3
+# max_total_exposure_pct = 0.30  # total $ across all positions ≤ 30% of account
+# max_sector_exposure_pct = 0.10 # per-sector $ ≤ 10% of account
 
 # [risk.sl_tp]
 # sl_atr_multiple = 2.0

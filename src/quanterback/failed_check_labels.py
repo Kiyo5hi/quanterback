@@ -2,8 +2,8 @@
 labels for display in reports and TG notifications.
 
 Identifiers come from CompositeRiskGate.evaluate() and decorator gates
-(PdtAwareRiskGate, SectorConcurrencyRiskGate). Keep this single source
-of truth — add new keys here when new gates introduce them.
+(PdtAwareRiskGate, TotalExposureRiskGate, SectorExposureRiskGate). Keep
+this single source of truth — add new keys here when new gates introduce them.
 """
 from __future__ import annotations
 
@@ -21,8 +21,10 @@ LABELS: dict[str, dict[str, str]] = {
         "strategy_dd_worse_than_bh": "strategy more risky than buy-and-hold",
         # PDT gate
         "pdt_protection": "PDT protection (account < $25k near day-trade limit)",
-        # Sector cap — prefix match
-        "sector_concurrency": "sector concurrency cap reached",
+        # Exposure caps
+        "total_exposure_exceeded": "total $ exposure cap reached",
+        # Sector exposure cap — prefix match
+        "sector_exposure": "sector $ exposure cap reached",
     },
     "zh": {
         "sanity_min_num_trades": "回测样本太少",
@@ -33,7 +35,8 @@ LABELS: dict[str, dict[str, str]] = {
         "oos_loss_relative_and_absolute": "样本外亏损跑输市场",
         "strategy_dd_worse_than_bh": "策略回撤比大盘还大",
         "pdt_protection": "PDT 保护触发(账户 < $25k 且接近 day-trade 上限)",
-        "sector_concurrency": "同板块持仓已满",
+        "total_exposure_exceeded": "总 $ 暴露已达上限",
+        "sector_exposure": "同板块 $ 暴露已达上限",
     },
 }
 
@@ -41,7 +44,7 @@ LABELS: dict[str, dict[str, str]] = {
 def humanize(failed_check: str, language: str = "en") -> str:
     """Translate one failed_check identifier to a friendly label."""
     table = LABELS.get(language, LABELS["en"])
-    # Some identifiers carry a suffix after ":" (e.g., sector_concurrency:ai_semi)
+    # Some identifiers carry a suffix after ":" (e.g., sector_exposure:ai_semi)
     base, _, detail = failed_check.partition(":")
     label = table.get(base, failed_check)  # fall through to raw if unknown
     if detail:
@@ -59,17 +62,14 @@ def humanize_list(failed_checks: list[str], language: str = "en") -> str:
 # Top-level rejection reasons (from pipeline) — different from
 # RiskAssessment failed_checks above. These come from:
 #  - "ticker has open lifecycle" — already holding the ticker
-#  - "max_concurrent_positions reached" — cap full
 #  - "riskgate: 'X'" — risk gate inner failure (X is humanizable above)
 #  - "exception: ..." — pipeline error
 REJECT_LABELS: dict[str, dict[str, str]] = {
     "en": {
         "ticker has open lifecycle": "already holding this ticker (won't double-up)",
-        "max_concurrent_positions reached": "concurrent-positions cap full (5/5)",
     },
     "zh": {
         "ticker has open lifecycle": "已持有该票（避免重复建仓）",
-        "max_concurrent_positions reached": "持仓数已达上限 (5/5)",
     },
 }
 

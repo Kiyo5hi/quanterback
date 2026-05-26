@@ -40,8 +40,11 @@ from quanterback.adapters.position.sqlite_alpaca_synced_state import (
 from quanterback.adapters.risk.atr_bracket_builder import ATRBracketOrderBuilder
 from quanterback.adapters.risk.composite_risk_gate import CompositeRiskGate
 from quanterback.adapters.risk.pdt_aware_risk_gate import PdtAwareRiskGate
-from quanterback.adapters.risk.sector_concurrency_risk_gate import (
-    SectorConcurrencyRiskGate,
+from quanterback.adapters.risk.sector_exposure_risk_gate import (
+    SectorExposureRiskGate,
+)
+from quanterback.adapters.risk.total_exposure_risk_gate import (
+    TotalExposureRiskGate,
 )
 from quanterback.adapters.risk.vectorized_backtester import VectorizedBacktester
 from quanterback.adapters.state.sqlite_system_state import SqliteSystemStateService
@@ -115,11 +118,16 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         api_key=config.alpaca_key, secret=config.alpaca_secret,
     )
     risk_gate: RiskGate = CompositeRiskGate()
-    if config.sector_concurrency_enabled:
-        risk_gate = SectorConcurrencyRiskGate(
-            inner=risk_gate, store=store,
-            max_per_sector=config.sector_max_per_sector,
-        )
+    risk_gate = TotalExposureRiskGate(
+        inner=risk_gate, store=store, executor=executor,
+        max_total_exposure_pct=config.max_total_exposure_pct,
+        position_size_pct=config.position_size_pct,
+    )
+    risk_gate = SectorExposureRiskGate(
+        inner=risk_gate, store=store, executor=executor,
+        max_sector_exposure_pct=config.max_sector_exposure_pct,
+        position_size_pct=config.position_size_pct,
+    )
     if config.pdt_protection_enabled:
         risk_gate = PdtAwareRiskGate(
             inner=risk_gate, executor=executor,
@@ -163,7 +171,6 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         system_state=sys_state,
         thresholds=config.risk_thresholds,
         backtest_lookback_years=config.backtest_lookback_years,
-        max_concurrent_positions=config.max_concurrent_positions,
         macro_data_provider=data_provider,
         news_provider=data_provider,
         fundamentals_provider=data_provider,

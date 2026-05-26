@@ -99,7 +99,6 @@ def _make_pipeline(
             min_num_trades=1, min_sharpe=0.0, min_profit_factor=0.0
         ),
         backtest_lookback_years=3,
-        max_concurrent_positions=5,
         macro_data_provider=None,
     )
     if open_tickers:
@@ -206,7 +205,6 @@ def test_scenario_3_risk_gate_rejects_excessive_drawdown(tmp_path: Path) -> None
             min_profit_factor=0.5,
         ),
         backtest_lookback_years=3,
-        max_concurrent_positions=5,
     )
     pipeline.run()
     assert executor.submitted == []

@@ -14,7 +14,7 @@ def test_humanize_unknown_check_passes_through() -> None:
 
 
 def test_humanize_with_suffix() -> None:
-    assert humanize("sector_concurrency:ai_semi", "zh") == "同板块持仓已满 (ai_semi)"
+    assert humanize("sector_exposure:ai_semi", "zh") == "同板块 $ 暴露已达上限 (ai_semi)"
 
 
 def test_humanize_list_joins() -> None:

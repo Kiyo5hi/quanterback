@@ -27,7 +27,8 @@ def test_load_defaults_only(tmp_path: Path) -> None:
     toml.write_text(_minimal_secrets_toml())
     cfg = AppConfig.load(toml_paths=[toml])
     assert cfg.position_size_pct == 0.05
-    assert cfg.max_concurrent_positions == 5
+    assert cfg.max_total_exposure_pct == 0.30
+    assert cfg.max_sector_exposure_pct == 0.10
     assert cfg.sl_atr_multiple == 1.5
     assert cfg.tp_atr_multiple == 3.0
     assert cfg.risk_thresholds.max_drawdown == 0.5
@@ -287,23 +288,23 @@ def test_trail_percent_defaults_to_none(tmp_path: Path) -> None:
     assert cfg.trail_percent is None
 
 
-def test_load_sector_concurrency_config(tmp_path: Path) -> None:
+def test_load_exposure_caps_config(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(
         _minimal_secrets_toml() +
-        '[risk.sector]\nenabled = false\nmax_per_sector = 3\n'
+        '[position]\nmax_total_exposure_pct = 0.40\nmax_sector_exposure_pct = 0.15\n'
     )
     cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.sector_concurrency_enabled is False
-    assert cfg.sector_max_per_sector == 3
+    assert cfg.max_total_exposure_pct == 0.40
+    assert cfg.max_sector_exposure_pct == 0.15
 
 
-def test_sector_concurrency_defaults_enabled(tmp_path: Path) -> None:
+def test_exposure_caps_defaults(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(_minimal_secrets_toml())
     cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.sector_concurrency_enabled is True
-    assert cfg.sector_max_per_sector == 2
+    assert cfg.max_total_exposure_pct == 0.30
+    assert cfg.max_sector_exposure_pct == 0.10
 
 
 def test_load_universe_screener_config(tmp_path: Path) -> None:

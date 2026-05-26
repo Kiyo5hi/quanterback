@@ -22,7 +22,10 @@ top_n_bearish = 5
 
 [position]
 position_size_pct = 0.05
-max_concurrent_positions = 5
+# Total $ across all positions ≤ 30% of account
+max_total_exposure_pct = 0.30
+# Per-sector $ ≤ 10% of account
+max_sector_exposure_pct = 0.10
 
 [risk.sl_tp]
 sl_atr_multiple = 1.5
@@ -41,12 +44,6 @@ min_sharpe = -0.5
 min_win_rate = 0.0
 min_profit_factor = 0.0
 min_num_trades = 5
-
-[risk.sector]
-# Reject BUY when this many positions in the same sector are already open.
-# Prevents over-concentration (e.g., NVDA+AMD+ARM = one AI-semi bet not three).
-enabled = true
-max_per_sector = 2
 
 [risk.pdt]
 # Pattern Day Trader protection. Off by default — paper trading is

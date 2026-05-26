@@ -30,7 +30,8 @@ class AppConfig:
 
     # position sizing
     position_size_pct: float
-    max_concurrent_positions: int
+    max_total_exposure_pct: float
+    max_sector_exposure_pct: float
 
     # SL/TP
     sl_atr_multiple: float
@@ -39,8 +40,6 @@ class AppConfig:
 
     # risk gate
     risk_thresholds: RiskThresholds
-    sector_concurrency_enabled: bool
-    sector_max_per_sector: int
     pdt_protection_enabled: bool
     pdt_min_equity: float
     pdt_max_day_trades: int
@@ -111,7 +110,6 @@ class AppConfig:
         risk_section = merged.get("risk", {})
         risk_sl_tp = risk_section.get("sl_tp", {})
         risk_th = risk_section.get("thresholds", {})
-        sector_section = risk_section.get("sector", {})
         pdt_section = risk_section.get("pdt", {})
         backtest = merged.get("backtest", {})
         llm = merged.get("llm", {})
@@ -182,7 +180,8 @@ class AppConfig:
             universe_top_n=int(universe.get("top_n", 10)),
             force_scan_when_closed=bool(scan.get("force_scan_when_closed", False)),
             position_size_pct=float(position.get("position_size_pct", 0.05)),
-            max_concurrent_positions=int(position.get("max_concurrent_positions", 5)),
+            max_total_exposure_pct=float(position.get("max_total_exposure_pct", 0.30)),
+            max_sector_exposure_pct=float(position.get("max_sector_exposure_pct", 0.10)),
             sl_atr_multiple=float(risk_sl_tp.get("sl_atr_multiple", 1.5)),
             tp_atr_multiple=float(risk_sl_tp.get("tp_atr_multiple", 3.0)),
             trail_percent=trail_percent,
@@ -193,8 +192,6 @@ class AppConfig:
                 min_profit_factor=float(risk_th.get("min_profit_factor", 0.0)),
                 min_num_trades=int(risk_th.get("min_num_trades", 5)),
             ),
-            sector_concurrency_enabled=bool(sector_section.get("enabled", True)),
-            sector_max_per_sector=int(sector_section.get("max_per_sector", 2)),
             pdt_protection_enabled=bool(pdt_section.get("enabled", False)),
             pdt_min_equity=float(pdt_section.get("min_equity", 25_000.0)),
             pdt_max_day_trades=int(pdt_section.get("max_day_trades", 3)),

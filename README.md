@@ -109,7 +109,8 @@ benchmark_ticker = "VOO"
 
 [position]
 position_size_pct = 0.05
-max_concurrent_positions = 5
+max_total_exposure_pct = 0.30
+max_sector_exposure_pct = 0.10
 
 [risk.sl_tp]
 sl_atr_multiple = 1.5

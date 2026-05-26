@@ -59,7 +59,6 @@ class ScanPipeline:
     system_state: SystemStateService
     thresholds: RiskThresholds
     backtest_lookback_years: int
-    max_concurrent_positions: int
     macro_data_provider: HistoricalDataProvider | None = None
     news_provider: NewsProvider | None = None
     fundamentals_provider: FundamentalsProvider | None = None
@@ -313,9 +312,6 @@ class ScanPipeline:
         # user wants the LLM's view on the ticker regardless of current holdings.
         # Frozen-mode dry_run still respects these gates for audit fidelity.
         if not preview_only:
-            if len(self.state_store.query_open_lifecycles()) >= self.max_concurrent_positions:
-                self._persist_rejection(run_id, event.ticker, "max_concurrent_positions reached")
-                return
             if self.position_state.has_open_lifecycle(event.ticker):
                 self._persist_rejection(run_id, event.ticker, "ticker has open lifecycle")
                 return

@@ -1,6 +1,6 @@
 """Static ticker → sector mapping. Coarse-grained (10 buckets).
 
-Used by SectorConcurrencyRiskGate to prevent over-concentration.
+Used by SectorExposureRiskGate to prevent over-concentration.
 Edit/extend as new tickers enter the universe."""
 from __future__ import annotations
 
