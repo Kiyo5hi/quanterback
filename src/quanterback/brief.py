@@ -94,7 +94,7 @@ def render_scan_brief(
     return i18n.render(
         "scan_brief",
         error=None,
-        now=now.strftime("%Y-%m-%d %H:%M UTC"),
+        now=i18n.format_dt(now, "%Y-%m-%d %H:%M %Z"),
         mode=getattr(config, "mode", "live"),
         n_processed=latest_run["tickers_processed"] or 0,
         n_errors=latest_run["errors_count"] or 0,

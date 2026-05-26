@@ -40,8 +40,8 @@ def generate_report(store: SqliteStore, sys_state: SqliteSystemStateService, i18
             duration_s = 0
         scan_runs.append({
             "id": r["id"],
-            "started": started.strftime("%Y-%m-%d %H:%M:%S"),
-            "ended": datetime.fromisoformat(r["ended_at"]).strftime("%Y-%m-%d %H:%M:%S") if r["ended_at"] else "(running)",
+            "started": i18n.format_dt(started, "%Y-%m-%d %H:%M:%S"),
+            "ended": i18n.format_dt(datetime.fromisoformat(r["ended_at"]), "%Y-%m-%d %H:%M:%S") if r["ended_at"] else "(running)",
             "duration": duration_s,
             "source": r["source"],
             "tickers_processed": r["tickers_processed"],
@@ -55,7 +55,7 @@ def generate_report(store: SqliteStore, sys_state: SqliteSystemStateService, i18
     ).fetchall()
     decisions = []
     for r in decision_rows:
-        ts = datetime.fromisoformat(r["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        ts = i18n.format_dt(datetime.fromisoformat(r["created_at"]), "%Y-%m-%d %H:%M:%S")
         if r["rejected_reason"]:
             action = "REJ"
             conf = "--"
@@ -128,7 +128,7 @@ def generate_report(store: SqliteStore, sys_state: SqliteSystemStateService, i18
     ).fetchall()
     open_positions = []
     for r in pos_rows:
-        ts = datetime.fromisoformat(r["opened_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        ts = i18n.format_dt(datetime.fromisoformat(r["opened_at"]), "%Y-%m-%d %H:%M:%S")
         entry = f"{r['entry_price']:.2f}" if r["entry_price"] is not None else "--"
         sl = f"{r['sl']:.2f}" if r["sl"] is not None else "--"
         tp = f"{r['tp']:.2f}" if r["tp"] is not None else "--"
@@ -160,9 +160,9 @@ def generate_report(store: SqliteStore, sys_state: SqliteSystemStateService, i18
 
     return i18n.render(
         "report",
-        now_iso=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        now_iso=i18n.format_dt(now, "%Y-%m-%d %H:%M:%S %Z"),
         system_mode=s.mode.upper(),
-        mode_changed_at=s.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+        mode_changed_at=i18n.format_dt(s.updated_at, "%Y-%m-%d %H:%M:%S"),
         mode_changed_by=s.updated_by,
         open_positions_count=open_pos_count,
         backtests_count=bt_count,
@@ -197,7 +197,7 @@ def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 3] + "..."
 
 
-def generate_positions_report(store: SqliteStore) -> str:
+def generate_positions_report(store: SqliteStore, i18n: I18n | None = None) -> str:
     """Open positions detail view with backtest metrics."""
     out = StringIO()
     conn = store._conn
@@ -227,7 +227,10 @@ def generate_positions_report(store: SqliteStore) -> str:
         sl = f"{r['sl']:.2f}" if r["sl"] is not None else "--"
         tp = f"{r['tp']:.2f}" if r["tp"] is not None else "--"
         qty = r["qty"] if r["qty"] is not None else "--"
-        opened_at = datetime.fromisoformat(r["opened_at"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if i18n:
+            opened_at = i18n.format_dt(datetime.fromisoformat(r["opened_at"]), "%Y-%m-%d %H:%M:%S %Z")
+        else:
+            opened_at = datetime.fromisoformat(r["opened_at"]).strftime("%Y-%m-%d %H:%M:%S UTC")
         alpaca_id = r["alpaca_order_id"] or "pending"
 
         # Calculate percentage moves
@@ -272,7 +275,7 @@ def generate_positions_report(store: SqliteStore) -> str:
     return out.getvalue()
 
 
-def generate_trades_report(store: SqliteStore, limit: int = 20) -> str:
+def generate_trades_report(store: SqliteStore, i18n: I18n | None = None, limit: int = 20) -> str:
     """Recent orders history with SL/TP and alpaca_order_id."""
     out = StringIO()
     conn = store._conn
@@ -300,7 +303,10 @@ def generate_trades_report(store: SqliteStore, limit: int = 20) -> str:
     )
 
     for r in rows:
-        submitted_at = datetime.fromisoformat(r["submitted_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        if i18n:
+            submitted_at = i18n.format_dt(datetime.fromisoformat(r["submitted_at"]), "%Y-%m-%d %H:%M:%S")
+        else:
+            submitted_at = datetime.fromisoformat(r["submitted_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
         # Parse bracket_spec_json
         try:

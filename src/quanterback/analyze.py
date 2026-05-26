@@ -28,7 +28,7 @@ def generate_analyze_report(store: SqliteStore, i18n: I18n) -> str:
 
     return i18n.render(
         "analyze",
-        now=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        now=i18n.format_dt(now, "%Y-%m-%d %H:%M:%S %Z"),
         daily_volume=daily_volume,
         pass_top=pass_top,
         buy_top=buy_top,

@@ -101,8 +101,10 @@ class BufferedTelegramNotifier:
         """Group events into a single Markdown summary."""
         # Find scan_summary for header
         summary = next((e for e in buffer if e.kind == "scan_summary"), None)
-        ts = (summary.timestamp if summary else datetime.now(tz=timezone.utc)
-              ).strftime("%Y-%m-%d %H:%M UTC")
+        ts = self._i18n.format_dt(
+            summary.timestamp if summary else datetime.now(tz=timezone.utc),
+            "%Y-%m-%d %H:%M %Z"
+        )
 
         by_kind: dict[str, list[NotificationEvent]] = defaultdict(list)
         for e in buffer:

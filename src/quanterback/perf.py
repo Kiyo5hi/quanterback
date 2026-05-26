@@ -28,7 +28,7 @@ def generate_perf_report(
     trades = _load_trades(store, days=days, ticker=ticker)
     return i18n.render(
         "perf",
-        now=datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        now=i18n.format_dt(datetime.now(tz=timezone.utc), "%Y-%m-%d %H:%M:%S %Z"),
         filter_days=days,
         filter_ticker=ticker,
         headline=_headline(trades),

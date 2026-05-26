@@ -60,7 +60,7 @@ log = logging.getLogger("quanterback")
 def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str]:
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     sys_state = SqliteSystemStateService(store)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     notifier = BufferedTelegramNotifier(
         token=config.tg_token, chat_ids=config.tg_chat_ids, store=store, i18n=i18n,
     )
@@ -188,7 +188,7 @@ def _setup_logging() -> None:
     )
 
 
-def _check_market_or_explain(executor, config) -> str | None:
+def _check_market_or_explain(executor, config, i18n: I18n | None = None) -> str | None:
     """Returns None if scan should proceed; returns user-facing message if market closed.
 
     Honors force_scan_when_closed config flag.
@@ -200,7 +200,11 @@ def _check_market_or_explain(executor, config) -> str | None:
             return None
         next_open = executor.next_market_open()
         if next_open is not None:
-            return f"⚠️ 市场关闭，scan 跳过。下次开市: {next_open.strftime('%Y-%m-%d %H:%M %Z')}"
+            if i18n:
+                next_open_str = i18n.format_dt(next_open, "%Y-%m-%d %H:%M %Z")
+            else:
+                next_open_str = next_open.strftime("%Y-%m-%d %H:%M %Z")
+            return f"⚠️ 市场关闭，scan 跳过。下次开市: {next_open_str}"
         return "⚠️ 市场关闭，scan 跳过。"
     except Exception as e:
         log.warning("Market-open check failed: %s — proceeding cautiously", e)
@@ -212,9 +216,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     config = _load_config()
     pipeline, _, _ = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
-    closed_msg = _check_market_or_explain(pipeline.executor, config)
+    closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
     if closed_msg is not None:
         print(closed_msg)
         return 0
@@ -241,9 +245,9 @@ def cmd_rescan(args: argparse.Namespace) -> int:
     config = _load_config()
     pipeline, _, _ = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
-    closed_msg = _check_market_or_explain(pipeline.executor, config)
+    closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
     if closed_msg is not None:
         print(closed_msg)
         return 0
@@ -281,7 +285,7 @@ def cmd_rescan(args: argparse.Namespace) -> int:
 def cmd_control_bot(_args: argparse.Namespace) -> int:
     _setup_logging()
     config = _load_config()
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     _, sys_state, token = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
 
@@ -569,7 +573,7 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                 "control_status_reply",
                 mode=state.mode, mode_emoji=mode_emoji,
                 pending=pending, open_positions=open_lc,
-                last_change=state.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
+                last_change=i18n.format_dt(state.updated_at, "%Y-%m-%d %H:%M %Z"),
             ))
 
     # Spawn each command in its own daemon thread so slow handlers
@@ -590,7 +594,7 @@ def cmd_report(_args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
     sys_state = SqliteSystemStateService(store)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     print(generate_report(store, sys_state, i18n))
     return 0
 
@@ -598,23 +602,25 @@ def cmd_report(_args: argparse.Namespace) -> int:
 def cmd_positions(_args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from quanterback.report import generate_positions_report
-    print(generate_positions_report(store))
+    print(generate_positions_report(store, i18n=i18n))
     return 0
 
 
 def cmd_trades(_args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from quanterback.report import generate_trades_report
-    print(generate_trades_report(store))
+    print(generate_trades_report(store, i18n=i18n))
     return 0
 
 
 def cmd_analyze(_args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from quanterback.analyze import generate_analyze_report
     print(generate_analyze_report(store, i18n))
     return 0
@@ -623,7 +629,7 @@ def cmd_analyze(_args: argparse.Namespace) -> int:
 def cmd_perf(args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from quanterback.perf import generate_perf_report
     print(generate_perf_report(store, i18n, days=args.days, ticker=args.ticker))
     return 0
@@ -633,7 +639,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     _setup_logging()
     config = _load_config()
     pipeline, _, _ = wire(config)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from datetime import date as _date
 
     from quanterback.replay import (
@@ -668,7 +674,7 @@ def cmd_track_positions(_args: argparse.Namespace) -> int:
     config = _load_config()
     pipeline, _, _ = wire(config)
     store = SqliteStore(config.db_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
     from quanterback.adapters.execution.alpaca_broker import AlpacaPaperBroker
     from quanterback.adapters.lifecycle.position_tracker import PositionTracker
@@ -743,7 +749,7 @@ def cmd_stress(args: argparse.Namespace) -> int:
     _setup_logging()
     config = _load_config()
     pipeline, _, _ = wire(config)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
     tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
 
@@ -776,7 +782,7 @@ def cmd_stress(args: argparse.Namespace) -> int:
 def cmd_calibration(args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
-    i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+    i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     from quanterback.calibration import generate_calibration_report
     print(generate_calibration_report(
         store, i18n,

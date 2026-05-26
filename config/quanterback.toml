@@ -108,3 +108,6 @@ db_path = "/data/quanterback.sqlite"
 # Values: "en" or "zh".
 language = "en"
 templates_dir = "/config/templates"
+# Display timezone for user-facing times. Storage and logs stay UTC.
+# Examples: "America/Los_Angeles", "America/New_York", "Asia/Shanghai", "UTC"
+timezone = "America/Los_Angeles"

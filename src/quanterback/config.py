@@ -76,6 +76,7 @@ class AppConfig:
     # i18n
     language: Literal["en", "zh"]
     templates_dir: Path
+    display_timezone: str  # e.g., "America/Los_Angeles"; display only, storage stays UTC
 
     # position tracker
     position_tracker_enabled: bool
@@ -217,6 +218,7 @@ class AppConfig:
             db_path=Path(storage.get("db_path", "/data/quanterback.sqlite")),
             language=_validate_language(i18n.get("language", "en")),
             templates_dir=Path(i18n.get("templates_dir", "/config/templates")),
+            display_timezone=str(i18n.get("timezone") or "America/Los_Angeles"),
             position_tracker_enabled=bool(position_tracker.get("enabled", True)),
             position_tracker_lookback_hours=int(position_tracker.get("lookback_hours", 48)),
             position_management_enabled=bool(position_management.get("enabled", False)),

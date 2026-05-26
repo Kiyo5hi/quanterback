@@ -1,7 +1,9 @@
 """Jinja2-backed i18n renderer. Templates live in config/templates/<lang>/."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -45,7 +47,7 @@ def _exit_reason_en(reason: str) -> str:
 class I18n:
     """Render Jinja2 templates from config/templates/<lang>/<name>.j2."""
 
-    def __init__(self, language: str, templates_dir: Path) -> None:
+    def __init__(self, language: str, templates_dir: Path, display_timezone: str = "America/Los_Angeles") -> None:
         lang_dir = templates_dir / language
         if not lang_dir.exists():
             raise ValueError(
@@ -53,6 +55,7 @@ class I18n:
                 f"check [i18n] templates_dir + language settings"
             )
         self._language = language
+        self._display_tz_name = display_timezone
         self._env = Environment(
             loader=FileSystemLoader(str(lang_dir)),
             autoescape=False,
@@ -71,6 +74,53 @@ class I18n:
         else:
             self._env.filters["exit_reason_en"] = _exit_reason_en
             self._env.filters["exit_reason"] = _exit_reason_en
+        # Register timezone-aware datetime filters
+        self._env.filters["tz"] = self._to_display_tz
+        self._env.filters["fmt_dt"] = self._fmt_dt
+        self._env.filters["fmt_date"] = self._fmt_date
+        self._env.filters["fmt_time"] = self._fmt_time
+
+    def _to_display_tz(self, dt: datetime | None) -> datetime | None:
+        """Convert a UTC-aware datetime to user display timezone."""
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            # naive — assume UTC
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(self._display_tz_name))
+
+    def _fmt_dt(self, dt: datetime | None, pattern: str = "%Y-%m-%d %H:%M %Z") -> str:
+        """Format datetime in display timezone."""
+        if dt is None:
+            return ""
+        converted = self._to_display_tz(dt)
+        return converted.strftime(pattern) if converted else ""
+
+    def _fmt_date(self, dt: datetime | None) -> str:
+        """Format date only in display timezone."""
+        if dt is None:
+            return ""
+        converted = self._to_display_tz(dt)
+        return converted.strftime("%Y-%m-%d") if converted else ""
+
+    def _fmt_time(self, dt: datetime | None) -> str:
+        """Format time only in display timezone."""
+        if dt is None:
+            return ""
+        converted = self._to_display_tz(dt)
+        return converted.strftime("%H:%M %Z") if converted else ""
+
+    def now_display(self) -> str:
+        """Current time formatted in display timezone."""
+        return self.format_dt(datetime.now(tz=timezone.utc))
+
+    def format_dt(self, dt: datetime | None, pattern: str = "%Y-%m-%d %H:%M %Z") -> str:
+        """Format a datetime in display timezone (Python helper for non-template code)."""
+        if dt is None:
+            return ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(self._display_tz_name)).strftime(pattern)
 
     @property
     def language(self) -> str:

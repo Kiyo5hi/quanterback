@@ -414,7 +414,7 @@ def generate_replay_report(result: ReplayResult, i18n: object) -> str:
     action_dist = Counter(d["action"] for d in result.decisions)
     return i18n.render(  # type: ignore
         "replay",
-        now=dt.now(tz=tz.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        now=i18n.format_dt(dt.now(tz=tz.utc), "%Y-%m-%d %H:%M:%S %Z"),
         start=result.config.start.isoformat(),
         end=result.config.end.isoformat(),
         tickers=", ".join(result.config.tickers),
