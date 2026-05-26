@@ -188,12 +188,36 @@ def _setup_logging() -> None:
     )
 
 
+def _check_market_or_explain(executor, config) -> str | None:
+    """Returns None if scan should proceed; returns user-facing message if market closed.
+
+    Honors force_scan_when_closed config flag.
+    """
+    if getattr(config, "force_scan_when_closed", False):
+        return None
+    try:
+        if executor.is_market_open():
+            return None
+        next_open = executor.next_market_open()
+        if next_open is not None:
+            return f"⚠️ 市场关闭，scan 跳过。下次开市: {next_open.strftime('%Y-%m-%d %H:%M %Z')}"
+        return "⚠️ 市场关闭，scan 跳过。"
+    except Exception as e:
+        log.warning("Market-open check failed: %s — proceeding cautiously", e)
+        return None
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     _setup_logging()
     config = _load_config()
     pipeline, _, _ = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+
+    closed_msg = _check_market_or_explain(pipeline.executor, config)
+    if closed_msg is not None:
+        print(closed_msg)
+        return 0
 
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
@@ -218,6 +242,11 @@ def cmd_rescan(args: argparse.Namespace) -> int:
     pipeline, _, _ = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     i18n = I18n(language=config.language, templates_dir=config.templates_dir)
+
+    closed_msg = _check_market_or_explain(pipeline.executor, config)
+    if closed_msg is not None:
+        print(closed_msg)
+        return 0
 
     # Read watchlist and extract tickers
     entries = store.list_watchlist()
