@@ -33,7 +33,6 @@ from quanterback.interfaces.notify import Notifier
 from quanterback.interfaces.risk import (
     Backtester,
     OrderBuilder,
-    PositionStateService,
     RiskGate,
 )
 from quanterback.interfaces.state import SystemStateService
@@ -49,7 +48,6 @@ class ScanPipeline:
     summarizer: Summarizer
     strategist: LLMStrategist
     approval_gate: ApprovalGate
-    position_state: PositionStateService
     backtester: Backtester
     risk_gate: RiskGate
     order_builder: OrderBuilder
@@ -62,7 +60,6 @@ class ScanPipeline:
     macro_data_provider: HistoricalDataProvider | None = None
     news_provider: NewsProvider | None = None
     fundamentals_provider: FundamentalsProvider | None = None
-    watchlist_auto_manager: object | None = None
     config: object | None = None
     llm_client: LLMClient | None = None
     _spy_closes: object = field(default=None, init=False, repr=False)
@@ -283,16 +280,6 @@ class ScanPipeline:
                 self._run_position_management(run_id, dry_run)
             except Exception as e:
                 log.exception("Position management failed: %s", e)
-
-        # Auto-manage watchlist membership
-        if self.watchlist_auto_manager is not None:
-            try:
-                counts = self.watchlist_auto_manager.tick()  # type: ignore[attr-defined]
-                if counts.get("promoted") or counts.get("demoted"):
-                    log.info("Watchlist auto-management: promoted=%d, demoted=%d",
-                             counts.get("promoted", 0), counts.get("demoted", 0))
-            except Exception as e:
-                log.exception("Watchlist auto-management failed: %s", e)
         return run_id
 
     def _process_event(self, event: ScanEvent, *, run_id: int, dry_run: bool, preview_only: bool = False) -> None:
@@ -313,7 +300,7 @@ class ScanPipeline:
         # user wants the LLM's view on the ticker regardless of current holdings.
         # Frozen-mode dry_run still respects these gates for audit fidelity.
         if not preview_only:
-            if self.position_state.has_open_lifecycle(event.ticker):
+            if self.state_store.has_open_lifecycle(event.ticker):
                 self._persist_rejection(run_id, event.ticker, "ticker has open lifecycle")
                 return
 

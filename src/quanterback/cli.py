@@ -25,16 +25,10 @@ from quanterback.adapters.events.watchlist_event_source import WatchlistEventSou
 from quanterback.adapters.execution.alpaca_broker import (
     AlpacaPaperBroker,
 )
-from quanterback.adapters.lifecycle.watchlist_auto_manager import (
-    WatchlistAutoManager,
-)
 from quanterback.adapters.notify.buffered_telegram_notifier import (
     BufferedTelegramNotifier,
 )
 from quanterback.adapters.notify.telegram_notifier import TelegramNotifier
-from quanterback.adapters.position.sqlite_alpaca_synced_state import (
-    SqliteAlpacaSyncedPositionState,
-)
 from quanterback.adapters.risk.atr_bracket_builder import ATRBracketOrderBuilder
 from quanterback.adapters.risk.composite_risk_gate import CompositeRiskGate
 from quanterback.adapters.risk.pdt_aware_risk_gate import PdtAwareRiskGate
@@ -118,7 +112,6 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
             min_equity=config.pdt_min_equity,
             max_day_trades=config.pdt_max_day_trades,
         )
-    position_state = SqliteAlpacaSyncedPositionState(store, alpaca_synced=False)
     watchlist = WatchlistEventSource(config.watchlist_path, store=store)
     screener: UniverseScreenerEventSource | None = None
     if config.universe_screener_enabled:
@@ -130,15 +123,6 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
     event_source = CompositeEventSource(
         watchlist=watchlist, store=store, screener=screener,
     )
-    watchlist_auto_manager = None
-    if config.watchlist_auto_enabled:
-        watchlist_auto_manager = WatchlistAutoManager(
-            store=store,
-            promote_min_buys=config.watchlist_promote_min_buys,
-            promote_window_days=config.watchlist_promote_window_days,
-            demote_max_quiet_days=config.watchlist_demote_max_quiet_days,
-            enabled=config.watchlist_auto_enabled,
-        )
     pipeline = ScanPipeline(
         event_source=event_source,
         data_provider=data_provider,
@@ -146,7 +130,6 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         strategist=strategist,
         llm_client=llm_client,
         approval_gate=approval_gate,
-        position_state=position_state,
         backtester=backtester,
         risk_gate=risk_gate,
         order_builder=order_builder,
@@ -159,7 +142,6 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         macro_data_provider=data_provider,
         news_provider=data_provider,
         fundamentals_provider=data_provider,
-        watchlist_auto_manager=watchlist_auto_manager,
         config=config,
     )
     return pipeline, sys_state, config.tg_token

@@ -64,10 +64,4 @@ Market: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: 
 {% endif %}
 
 {% endif %}
-{% if auto_promoted or auto_demoted %}═══ 🤖 *Auto-watchlist* ═══
-{% for s in auto_promoted %}+{{ s }}
-{% endfor %}
-{% for s in auto_demoted %}-{{ s }}
-{% endfor %}
-{% endif %}
 {% endif %}

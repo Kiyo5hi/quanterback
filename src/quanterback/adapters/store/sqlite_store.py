@@ -207,6 +207,18 @@ class SqliteStore:
             )
             return int(p.id)
 
+    def has_open_lifecycle(self, ticker: str) -> bool:
+        """True if any non-closed position exists for ticker."""
+        return self.get_open(ticker) is not None
+
+    def get_open(self, ticker: str) -> OpenLifecycle | None:
+        """Return the OpenLifecycle for ticker if a non-closed position exists."""
+        ticker = ticker.upper()
+        for lc in self.query_open_lifecycles():
+            if lc.ticker == ticker:
+                return lc
+        return None
+
     def query_open_lifecycles(self) -> list[OpenLifecycle]:
         # All non-closed positions including 'pending'. This is what
         # has_open_lifecycle(ticker) uses to prevent dup submits.

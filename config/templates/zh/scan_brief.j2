@@ -64,10 +64,4 @@
 {% endif %}
 
 {% endif %}
-{% if auto_promoted or auto_demoted %}═══ 🤖 *自动 Watchlist* ═══
-{% for s in auto_promoted %}+{{ s }}
-{% endfor %}
-{% for s in auto_demoted %}-{{ s }}
-{% endfor %}
-{% endif %}
 {% endif %}

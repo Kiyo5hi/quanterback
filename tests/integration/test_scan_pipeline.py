@@ -10,9 +10,6 @@ import pandas as pd
 from quanterback.adapters.data.rule_based_summarizer import RuleBasedSummarizer
 from quanterback.adapters.decision.noop_approval_gate import NoOpApprovalGate
 from quanterback.adapters.events.watchlist_event_source import WatchlistEventSource
-from quanterback.adapters.position.sqlite_alpaca_synced_state import (
-    SqliteAlpacaSyncedPositionState,
-)
 from quanterback.adapters.risk.atr_bracket_builder import ATRBracketOrderBuilder
 from quanterback.adapters.risk.threshold_risk_gate import ThresholdRiskGate
 from quanterback.adapters.risk.vectorized_backtester import VectorizedBacktester
@@ -83,7 +80,6 @@ def _make_pipeline(
         summarizer=RuleBasedSummarizer(),
         strategist=FakeStrategist(decision),
         approval_gate=NoOpApprovalGate(),
-        position_state=SqliteAlpacaSyncedPositionState(store, alpaca_synced=False),
         backtester=VectorizedBacktester(
             FakeHistoricalDataProvider({"AAPL": bt_data})
         ),
@@ -186,7 +182,6 @@ def test_scenario_3_risk_gate_rejects_excessive_drawdown(tmp_path: Path) -> None
         summarizer=RuleBasedSummarizer(),
         strategist=FakeStrategist(_buy_decision()),
         approval_gate=NoOpApprovalGate(),
-        position_state=SqliteAlpacaSyncedPositionState(store, alpaca_synced=False),
         backtester=VectorizedBacktester(
             FakeHistoricalDataProvider({"AAPL": bt_df})
         ),

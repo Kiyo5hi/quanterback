@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from quanterback.adapters.execution.alpaca_paper_executor import AlpacaPaperExecutor
+from quanterback.adapters.execution.alpaca_broker import AlpacaPaperBroker
 from quanterback.domain.order import BracketOrderSpec
 
 
@@ -39,14 +39,14 @@ def _spec() -> BracketOrderSpec:
 
 
 def test_submit_returns_alpaca_order_id(fake_trading_client: dict) -> None:
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     r = ex.submit(_spec(), dry_run=False)
     assert r.submitted
     assert r.order_id == "alpaca-1"
 
 
 def test_dry_run_does_not_call_broker(fake_trading_client: dict) -> None:
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     r = ex.submit(_spec(), dry_run=True)
     assert not r.submitted
     assert r.order_id is None
@@ -54,12 +54,12 @@ def test_dry_run_does_not_call_broker(fake_trading_client: dict) -> None:
 
 
 def test_account_value_returned_as_float(fake_trading_client: dict) -> None:
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     assert ex.get_account_value() == 125_000.50
 
 
 def test_get_day_trade_count_returns_int(fake_trading_client: dict) -> None:
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     assert ex.get_day_trade_count() == 2
 
 
@@ -70,7 +70,7 @@ def test_trailing_stop_ignored_with_bracket_order(
 
     Instead, a warning is logged recommending position_management agent for dynamic SL.
     """
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     spec = BracketOrderSpec(
         ticker="AMD", side="buy", qty=10, entry_type="market",
         limit_price=None, stop_loss_price=95.0, take_profit_price=110.0,
@@ -89,7 +89,7 @@ def test_bracket_order_when_trail_percent_is_none(
     fake_trading_client: dict,
 ) -> None:
     """Bracket order submitted normally when trail_percent is not set."""
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     spec = BracketOrderSpec(
         ticker="AMD", side="buy", qty=10, entry_type="market",
         limit_price=None, stop_loss_price=95.0, take_profit_price=110.0,
@@ -158,7 +158,7 @@ def test_trim_position_cancels_exit_leg_and_submits_market_sell(
     fake_trading_client_with_orders["open_orders"] = [
         _make_sell_order("leg-tp", "AMD", 10),
     ]
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     ok = ex.trim_position("AMD", qty_to_sell=5)
 
     assert ok is True
@@ -175,7 +175,7 @@ def test_trim_position_rejects_non_positive_qty(
     fake_trading_client_with_orders: dict,
 ) -> None:
     """trim_position(qty=0) is a no-op returning False."""
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     assert ex.trim_position("AMD", qty_to_sell=0) is False
     assert ex.trim_position("AMD", qty_to_sell=-3) is False
     # No orders touched
@@ -197,7 +197,7 @@ def test_trim_position_returns_false_on_broker_exception(
         "quanterback.adapters.execution.alpaca_broker.TradingClient",
         BoomClient,
     )
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     assert ex.trim_position("AMD", qty_to_sell=5) is False
 
 
@@ -209,7 +209,7 @@ def test_trim_position_only_cancels_legs_for_target_ticker(
         _make_sell_order("amd-leg", "AMD", 10),
         _make_sell_order("nvda-leg", "NVDA", 8),
     ]
-    ex = AlpacaPaperExecutor(api_key="k", secret="s")
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
     ex.trim_position("AMD", qty_to_sell=5)
 
     assert "amd-leg" in fake_trading_client_with_orders["cancelled"]

@@ -111,8 +111,6 @@ def render_scan_brief(
         passes_count=len(passes),
         rejects=rejects[:10],
         rejects_count=len(rejects),
-        auto_promoted=[],
-        auto_demoted=[],
     )
 
 
@@ -259,6 +257,4 @@ def _empty_ctx() -> dict:
         "passes_count": 0,
         "rejects": [],
         "rejects_count": 0,
-        "auto_promoted": [],
-        "auto_demoted": [],
     }

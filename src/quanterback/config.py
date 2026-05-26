@@ -81,12 +81,6 @@ class AppConfig:
     position_management_min_age_hours: float
     position_management_reeval_interval_hours: float
 
-    # watchlist auto-management
-    watchlist_auto_enabled: bool
-    watchlist_promote_min_buys: int
-    watchlist_promote_window_days: int
-    watchlist_demote_max_quiet_days: int
-
     @classmethod
     def load(cls, toml_paths: list[Path] | None = None) -> AppConfig:
         toml_paths = toml_paths or []
@@ -101,7 +95,6 @@ class AppConfig:
         position = merged.get("position", {})
         position_tracker = merged.get("position_tracker", {})
         position_management = merged.get("position_management", {})
-        watchlist_auto = merged.get("watchlist_auto", {})
         risk_section = merged.get("risk", {})
         risk_sl_tp = risk_section.get("sl_tp", {})
         risk_th = risk_section.get("thresholds", {})
@@ -212,10 +205,6 @@ class AppConfig:
             position_management_enabled=bool(position_management.get("enabled", False)),
             position_management_min_age_hours=float(position_management.get("min_age_hours", 6.0)),
             position_management_reeval_interval_hours=float(position_management.get("reeval_interval_hours", 4.0)),
-            watchlist_auto_enabled=bool(watchlist_auto.get("enabled", True)),
-            watchlist_promote_min_buys=int(watchlist_auto.get("promote_min_buys", 3)),
-            watchlist_promote_window_days=int(watchlist_auto.get("promote_window_days", 7)),
-            watchlist_demote_max_quiet_days=int(watchlist_auto.get("demote_max_quiet_days", 14)),
         )
         # Set universe dynamic fields on frozen instance using object.__setattr__
         object.__setattr__(instance, "universe_screener_enabled", bool(universe.get("enabled", True)))
