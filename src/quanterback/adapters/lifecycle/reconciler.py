@@ -100,37 +100,31 @@ class Reconciler:
         except Exception as e:
             log.exception("Manual close check failed: %s", e)
 
-        # 3. Check for unfilled orders stuck in 'pending' state
-        # These are orders in local DB that Alpaca reports as REJECTED or EXPIRED
+        # 3. Check for unfilled orders that Alpaca EXPLICITLY rejected/expired.
+        # IMPORTANT: do NOT auto-close on "missing from Alpaca list" — Alpaca's
+        # GET /orders has eventual consistency (a just-submitted order can take
+        # several seconds to appear). The previous version of this check killed
+        # legitimate just-submitted positions in <2s, causing duplicate orders
+        # (real incident 2026-05-26: BB submitted twice, $10k vs $5k intended
+        # exposure). Now only close on EXPLICIT terminal status from Alpaca.
+        # Also: skip positions younger than a grace period.
         try:
             alpaca_all_orders = self._list_alpaca_all_orders()
             alpaca_by_id = {o["id"]: o for o in alpaca_all_orders}
+            now = datetime.now(tz=timezone.utc)
+            GRACE_PERIOD = timedelta(minutes=5)
 
             local_pending = self._get_local_pending_orders()
             for local_order in local_pending:
+                # Skip if too young — Alpaca propagation window
+                opened_at = local_order.get("opened_at")
+                if opened_at and (now - opened_at) < GRACE_PERIOD:
+                    continue
                 alpaca_order = alpaca_by_id.get(local_order["order_id"])
+                # Only act on EXPLICIT terminal statuses, NOT on missing.
                 if alpaca_order is None:
-                    # Order doesn't exist in Alpaca at all — likely rejected/expired
-                    log.warning(
-                        "Local pending position %s (order_id=%s) has no Alpaca record — "
-                        "marking closed as rejected",
-                        local_order["ticker"], local_order["order_id"]
-                    )
-                    self.store.mark_position_closed(
-                        local_order["ticker"],
-                        closed_at=datetime.now(tz=timezone.utc),
-                        exit_price=0.0,
-                    )
-                    try:
-                        self.store._conn.execute(
-                            "UPDATE positions SET exit_reason='reconciled_order_missing' "
-                            "WHERE id=?",
-                            (local_order["id"],)
-                        )
-                    except Exception:
-                        pass
-                    report.local_unfilled_orders_detected += 1
-                elif alpaca_order.get("status") in ("rejected", "expired", "canceled"):
+                    continue  # eventual consistency: leave it for cleanup_stale_pendings
+                if alpaca_order.get("status") in ("rejected", "expired", "canceled"):
                     log.warning(
                         "Local pending position %s (order_id=%s) is %s in Alpaca — "
                         "marking closed",
@@ -139,7 +133,7 @@ class Reconciler:
                     )
                     self.store.mark_position_closed(
                         local_order["ticker"],
-                        closed_at=datetime.now(tz=timezone.utc),
+                        closed_at=now,
                         exit_price=0.0,
                     )
                     try:
@@ -203,22 +197,31 @@ class Reconciler:
         """Get all pending (unfilled) positions from local DB with details.
 
         Returns Alpaca order IDs (from orders.alpaca_order_id), not DB FKs.
+        Includes opened_at so callers can apply propagation grace period.
         """
         try:
             rows = self.store._conn.execute(
-                "SELECT p.id, p.ticker, p.state, o.alpaca_order_id FROM positions p "
+                "SELECT p.id, p.ticker, p.state, p.opened_at, o.alpaca_order_id "
+                "FROM positions p "
                 "LEFT JOIN orders o ON p.order_id = o.id "
                 "WHERE p.state = 'pending'"
             ).fetchall()
-            return [
-                {
+            out = []
+            for r in rows:
+                opened_at = None
+                if r["opened_at"]:
+                    try:
+                        opened_at = datetime.fromisoformat(r["opened_at"])
+                    except Exception:
+                        opened_at = None
+                out.append({
                     "id": r["id"],
                     "ticker": r["ticker"],
                     "order_id": str(r["alpaca_order_id"]) if r["alpaca_order_id"] else None,
                     "state": r["state"],
-                }
-                for r in rows
-            ]
+                    "opened_at": opened_at,
+                })
+            return out
         except Exception as e:
             log.warning("Failed to query local pending orders: %s", e)
             return []
