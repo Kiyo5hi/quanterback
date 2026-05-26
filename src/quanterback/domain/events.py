@@ -28,7 +28,7 @@ class ControlCommand(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     command: Literal[
-        "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan",
+        "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan", "preview",
         "watchlist", "add", "remove",
     ]
     actor: str

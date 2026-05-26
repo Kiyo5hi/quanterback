@@ -57,13 +57,13 @@ def test_cmd_rescan_calls_run_for_tickers(monkeypatch) -> None:
     # Mock setup_logging
     monkeypatch.setattr("quanterback.cli._setup_logging", lambda: None)
 
-    args = argparse.Namespace(format="brief", limit=50)
+    args = argparse.Namespace(format="brief", limit=50, dry_run=False)
     with patch("builtins.print") as mock_print:
         result = cmd_rescan(args)
 
     assert result == 0
     mock_pipeline.run_for_tickers.assert_called_once_with(
-        ["AAPL", "NVDA", "TSLA"], trigger_label="/rescan"
+        ["AAPL", "NVDA", "TSLA"], trigger_label="/rescan", force_dry_run=False
     )
     mock_print.assert_called()
 
@@ -83,7 +83,7 @@ def test_cmd_rescan_empty_watchlist(monkeypatch) -> None:
     monkeypatch.setattr("quanterback.cli.I18n", lambda *args, **kwargs: MagicMock())
     monkeypatch.setattr("quanterback.cli._setup_logging", lambda: None)
 
-    args = argparse.Namespace(format="brief", limit=50)
+    args = argparse.Namespace(format="brief", limit=50, dry_run=False)
     with patch("builtins.print") as mock_print:
         result = cmd_rescan(args)
 
@@ -126,7 +126,7 @@ def test_cmd_rescan_respects_limit(monkeypatch) -> None:
     )
     monkeypatch.setattr("quanterback.cli._setup_logging", lambda: None)
 
-    args = argparse.Namespace(format="brief", limit=10)
+    args = argparse.Namespace(format="brief", limit=10, dry_run=False)
     with patch("builtins.print"):
         result = cmd_rescan(args)
 
@@ -134,3 +134,4 @@ def test_cmd_rescan_respects_limit(monkeypatch) -> None:
     # Should only call with first 10 tickers and trigger_label
     assert mock_pipeline.run_for_tickers.call_args[0][0] == [f"SYM{i:03d}" for i in range(10)]
     assert mock_pipeline.run_for_tickers.call_args[1]["trigger_label"] == "/rescan"
+    assert mock_pipeline.run_for_tickers.call_args[1]["force_dry_run"] == False

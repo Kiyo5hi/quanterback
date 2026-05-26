@@ -13,6 +13,8 @@ COMMANDS: list[tuple[str, str, str]] = [
                   "查看系统状态和最近活动"),
     ("scan",      "Trigger an immediate scan: /scan AAPL,MSFT or /scan (all)",
                   "手动触发扫描: /scan AAPL,MSFT 或 /scan (全部)"),
+    ("preview",   "Analyze ticker without trading: /preview AAPL,MSFT or /preview (all)",
+                  "分析而不下单: /preview AAPL,MSFT 或 /preview (全部)"),
     ("rescan",    "Re-scan entire watchlist",
                   "重新扫描整个监视列表"),
     ("watchlist", "Manage watchlist: /watchlist [list|add|remove] [SYM]",

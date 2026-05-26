@@ -12,11 +12,11 @@ from quanterback.domain.events import ControlCommand
 log = logging.getLogger(__name__)
 
 VALID_COMMANDS = {
-    "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan",
+    "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan", "preview",
     "watchlist", "add", "remove",
 }
 CommandType = Literal[
-    "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan",
+    "freeze", "unfreeze", "halt", "unhalt", "status", "scan", "rescan", "preview",
     "watchlist", "add", "remove",
 ]
 
@@ -36,9 +36,9 @@ def parse_command(update: dict[str, Any]) -> ControlCommand | None:
     message_id = int(msg.get("message_id", 0))
     chat_id = str(msg.get("chat", {}).get("id", actor))
 
-    # Parse args: for scan, uppercase; for watchlist/add/remove, keep as-is
-    if head in ("scan", "watchlist", "add", "remove"):
-        if head == "scan":
+    # Parse args: for scan/preview, uppercase; for watchlist/add/remove, keep as-is
+    if head in ("scan", "preview", "watchlist", "add", "remove"):
+        if head in ("scan", "preview"):
             args = tuple(a.upper() for a in tokens[1:])
         else:
             args = tuple(tokens[1:])
@@ -59,6 +59,8 @@ def parse_command(update: dict[str, Any]) -> ControlCommand | None:
         cmd = "scan"
     elif head == "rescan":
         cmd = "rescan"
+    elif head == "preview":
+        cmd = "preview"
     elif head == "watchlist":
         cmd = "watchlist"
     elif head == "add":

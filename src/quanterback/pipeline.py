@@ -69,18 +69,23 @@ class ScanPipeline:
     _market_context: dict = field(default_factory=dict, init=False, repr=False)
     _effective_top_n: int = field(default=10, init=False, repr=False)
 
-    def run_for_tickers(self, tickers: list[str], trigger_label: str = "") -> int | None:
+    def run_for_tickers(self, tickers: list[str], trigger_label: str = "", force_dry_run: bool = False) -> int | None:
         """Run scan for specific tickers, ignoring watchlist/screener.
 
         Returns the scan_run id of this invocation (so callers can render
         a brief for THIS specific run, not race against concurrent scans).
         Returns None if the system is halted.
+
+        Args:
+            tickers: List of ticker symbols to scan
+            trigger_label: Label for this scan run (e.g., "/scan AAPL" or "[DRY] /preview")
+            force_dry_run: If True, skip order submission (per-invocation override)
         """
         st = self.system_state.get_current()
         if st.mode == "halted":
             log.info("System halted; exiting without scan.")
             return None
-        dry_run = (st.mode == "frozen")
+        dry_run = force_dry_run or (st.mode == "frozen")
 
         run = ScanRun(started_at=datetime.now(tz=timezone.utc), source="user_trigger",
                       trigger_label=trigger_label)
@@ -176,12 +181,12 @@ class ScanPipeline:
                 log.warning("discard_buffer failed: %s", e)
         return run_id
 
-    def run(self) -> int | None:
+    def run(self, force_dry_run: bool = False) -> int | None:
         st = self.system_state.get_current()
         if st.mode == "halted":
             log.info("System halted; exiting without scan.")
             return None
-        dry_run = (st.mode == "frozen")
+        dry_run = force_dry_run or (st.mode == "frozen")
 
         run = ScanRun(started_at=datetime.now(tz=timezone.utc), source="cron", trigger_label="cron")
         run_id = self.state_store.insert_scan_run(run)

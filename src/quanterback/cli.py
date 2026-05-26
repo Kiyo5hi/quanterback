@@ -223,13 +223,15 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print(closed_msg)
         return 0
 
+    dry_run = getattr(args, "dry_run", False)
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
         ticker_str = ",".join(tickers)
-        trigger_label = f"/scan {ticker_str[:30]}"
-        scan_run_id = pipeline.run_for_tickers(tickers, trigger_label=trigger_label)
+        dry_prefix = "[DRY] " if dry_run else ""
+        trigger_label = f"{dry_prefix}/scan {ticker_str[:30]}"
+        scan_run_id = pipeline.run_for_tickers(tickers, trigger_label=trigger_label, force_dry_run=dry_run)
     else:
-        scan_run_id = pipeline.run()
+        scan_run_id = pipeline.run(force_dry_run=dry_run)
 
     # Render output in requested format
     if args.format == "brief":
@@ -271,7 +273,9 @@ def cmd_rescan(args: argparse.Namespace) -> int:
         )
 
     # Run pipeline for these tickers
-    scan_run_id = pipeline.run_for_tickers(tickers, trigger_label="/rescan")
+    dry_run = getattr(args, "dry_run", False)
+    dry_prefix = "[DRY] " if dry_run else ""
+    scan_run_id = pipeline.run_for_tickers(tickers, trigger_label=f"{dry_prefix}/rescan", force_dry_run=dry_run)
 
     # Render output in requested format
     if args.format == "brief":
@@ -411,7 +415,7 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
 
     channel = TelegramControlChannel(token=token)
     log.info(
-        "ControlBot listening for /freeze /unfreeze /halt /unhalt /status /scan /rescan "
+        "ControlBot listening for /freeze /unfreeze /halt /unhalt /status /scan /rescan /preview "
         "/watchlist /add /remove"
     )
 
@@ -494,6 +498,58 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                 final = i18n.render("control_rescan_error", stderr=str(e)[-500:])
                 log.error("rescan subprocess exception: %s", e)
             send_long(cmd, running_id, final, chat)
+        elif command == "preview":
+            if cmd.args:
+                tickers = list(cmd.args)
+                ticker_count = len(tickers)
+                running_id = reply(cmd, i18n.render(
+                    "control_scan_running", ticker_count=ticker_count,
+                ))
+                # Run scan with --dry-run flag via subprocess with 120s timeout
+                cmd_args = ["quanterback", "scan", "--format", "brief", "--dry-run",
+                            "--tickers", ",".join(tickers)]
+                try:
+                    result = subprocess.run(
+                        cmd_args, capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode != 0:
+                        stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
+                        final = i18n.render("control_scan_error", stderr=stderr_tail)
+                        log.error("preview subprocess failed: %s", result.stderr)
+                    else:
+                        summary = result.stdout if result.stdout else ""
+                        final = i18n.render("control_scan_done", summary=summary)
+                        log.info("preview subprocess succeeded for %d tickers", ticker_count)
+                except subprocess.TimeoutExpired:
+                    final = i18n.render("control_scan_timeout")
+                    log.error("preview subprocess exceeded 120s timeout for tickers=%s", tickers)
+                except Exception as e:
+                    final = i18n.render("control_scan_error", stderr=str(e)[-500:])
+                    log.error("preview subprocess exception: %s", e)
+                send_long(cmd, running_id, final, chat)
+            else:
+                running_id = reply(cmd, i18n.render("control_rescan_running"))
+                # Run rescan with --dry-run flag via subprocess with 600s timeout
+                try:
+                    result = subprocess.run(
+                        ["quanterback", "rescan", "--format", "brief", "--dry-run"],
+                        capture_output=True, text=True, timeout=600,
+                    )
+                    if result.returncode != 0:
+                        stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
+                        final = i18n.render("control_rescan_error", stderr=stderr_tail)
+                        log.error("preview (full) subprocess failed: %s", result.stderr)
+                    else:
+                        summary = result.stdout if result.stdout else ""
+                        final = i18n.render("control_rescan_done", summary=summary)
+                        log.info("preview (full) subprocess succeeded")
+                except subprocess.TimeoutExpired:
+                    final = i18n.render("control_rescan_timeout")
+                    log.error("preview (full) subprocess exceeded 600s timeout")
+                except Exception as e:
+                    final = i18n.render("control_rescan_error", stderr=str(e)[-500:])
+                    log.error("preview (full) subprocess exception: %s", e)
+                send_long(cmd, running_id, final, chat)
         elif command == "watchlist":
             # /watchlist [list|add|remove] [SYM]
             if not cmd.args or cmd.args[0].lower() == "list":
@@ -802,10 +858,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated tickers to scan; if omitted, scans entire watchlist"
     )
     scan_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Analyze without submitting orders to broker"
+    )
+    scan_parser.add_argument(
         "--format", choices=["summary", "brief"], default="summary",
         help="Output format: summary (terse) or brief (rich per-ticker)"
     )
     rescan_parser = sub.add_parser("rescan", help="Full watchlist re-scan (every ticker, synchronous)")
+    rescan_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Analyze without submitting orders to broker"
+    )
     rescan_parser.add_argument(
         "--format", choices=["summary", "brief"], default="brief",
         help="Output format (default 'brief' for manual full sweep)"
