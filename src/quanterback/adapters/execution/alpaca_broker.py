@@ -160,6 +160,50 @@ class AlpacaPaperBroker:
             ))
         return out
 
+    def list_all_orders(
+        self, status: str | None = None, after: datetime | None = None
+    ) -> list[dict]:
+        """Get all orders matching status and optional timestamp filter.
+
+        Returns dicts with at least 'id' and 'status' keys.
+        """
+        try:
+            orders_to_check = []
+            # Statuses to check: open, pending, rejected, expired, canceled
+            statuses_to_query = [
+                QueryOrderStatus.OPEN,
+                QueryOrderStatus.PENDING_NEW,
+                QueryOrderStatus.ACCEPTED,
+                QueryOrderStatus.REJECTED,
+                QueryOrderStatus.EXPIRED,
+                QueryOrderStatus.CANCELED,
+            ]
+            # If specific status requested, filter to just that one
+            if status:
+                status_enum = getattr(QueryOrderStatus, status.upper(), None)
+                if status_enum:
+                    statuses_to_query = [status_enum]
+                else:
+                    statuses_to_query = []
+
+            for status_enum in statuses_to_query:
+                try:
+                    req = GetOrdersRequest(status=status_enum, limit=200)
+                    if after:
+                        req.after = after
+                    resp = self._client.get_orders(filter=req)
+                    for o in resp:
+                        orders_to_check.append({
+                            "id": str(o.id),
+                            "status": str(o.status) if o.status else "unknown",
+                        })
+                except Exception:
+                    pass
+            return orders_to_check
+        except Exception as e:
+            log.warning("Failed to list all Alpaca orders: %s", e)
+            return []
+
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a specific order by ID. Returns True if successful."""
         try:

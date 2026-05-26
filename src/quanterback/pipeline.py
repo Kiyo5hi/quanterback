@@ -288,13 +288,17 @@ class ScanPipeline:
 
     def _process_event(self, event: ScanEvent, *, run_id: int, dry_run: bool) -> None:
         # Reconcile before checking if we can open new positions (defense in depth)
-        # This catches any drift from previous runs and frees up capacity
+        # This catches any drift from previous runs and frees up capacity.
+        # Failures are logged but don't block the scan (production safety).
         try:
             from quanterback.adapters.lifecycle.reconciler import Reconciler
             reconciler = Reconciler(broker=self.executor, store=self.state_store)
-            reconciler.reconcile()
+            report = reconciler.reconcile()
+            if report.orphan_orders_cancelled or report.manual_closes_detected:
+                log.info("Reconciliation freed capacity: orphans=%d, manual_closes=%d",
+                         report.orphan_orders_cancelled, report.manual_closes_detected)
         except Exception as e:
-            log.warning("Pre-event reconciliation failed: %s", e)
+            log.warning("Pre-event reconciliation failed (continuing scan): %s", e)
 
         if len(self.state_store.query_open_lifecycles()) >= self.max_concurrent_positions:
             self._persist_rejection(run_id, event.ticker, "max_concurrent_positions reached")

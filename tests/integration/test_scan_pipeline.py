@@ -235,6 +235,9 @@ def test_scenario_5_ticker_already_open_rejected(tmp_path: Path) -> None:
     pipeline, store, executor, _ = _make_pipeline(
         tmp_path, decision=_buy_decision(), open_tickers=("AAPL",),
     )
+    # Seed the executor to know about the pre-existing position
+    # (matches DB state so reconciler won't mark it as manually closed)
+    executor.seed_position("AAPL", qty=20, entry_price=200.0)
     pipeline.run()
     assert executor.submitted == []
     rej = store._conn.execute(

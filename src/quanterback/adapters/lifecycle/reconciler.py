@@ -151,17 +151,8 @@ class Reconciler:
     def _list_alpaca_open_orders(self) -> list[str]:
         """Get list of open order IDs from Alpaca."""
         try:
-            from alpaca.trading.enums import QueryOrderStatus
-            from alpaca.trading.requests import GetOrdersRequest
-
-            # Access broker's internal client (not ideal, but necessary for this check)
-            client = self.broker._client  # type: ignore[attr-defined]
-            req = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN,
-                limit=500,
-            )
-            orders = client.get_orders(filter=req)
-            return [str(o.id) for o in orders]
+            orders = self.broker.list_all_orders(status="open")
+            return [str(o["id"]) for o in orders]
         except Exception as e:
             log.warning("Failed to list Alpaca open orders: %s", e)
             return []
@@ -169,26 +160,8 @@ class Reconciler:
     def _list_alpaca_all_orders(self) -> list[dict]:
         """Get all recent orders from Alpaca with status."""
         try:
-            from alpaca.trading.enums import QueryOrderStatus
-            from alpaca.trading.requests import GetOrdersRequest
-
-            client = self.broker._client  # type: ignore[attr-defined]
-            # Get all non-closed orders (open, pending, etc.)
-            orders_to_check = []
-            for status in [QueryOrderStatus.OPEN, QueryOrderStatus.PENDING_NEW,
-                          QueryOrderStatus.ACCEPTED, QueryOrderStatus.REJECTED,
-                          QueryOrderStatus.EXPIRED, QueryOrderStatus.CANCELED]:
-                try:
-                    req = GetOrdersRequest(status=status, limit=200)
-                    resp = client.get_orders(filter=req)
-                    for o in resp:
-                        orders_to_check.append({
-                            "id": str(o.id),
-                            "status": str(o.status) if o.status else "unknown",
-                        })
-                except Exception:
-                    pass
-            return orders_to_check
+            # Call the Protocol method which handles Alpaca API details
+            return self.broker.list_all_orders()
         except Exception as e:
             log.warning("Failed to list Alpaca all orders: %s", e)
             return []

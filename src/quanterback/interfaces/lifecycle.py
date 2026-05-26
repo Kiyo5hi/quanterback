@@ -38,3 +38,16 @@ class BrokerLifecyclePort(Protocol):
     def list_orders_after(self, after: datetime) -> list[OrderSnapshot]:
         """Get closed orders since a given timestamp."""
         ...
+
+    def list_all_orders(
+        self, status: str | None = None, after: datetime | None = None
+    ) -> list[dict]:
+        """Get all orders matching status and optional timestamp filter.
+
+        Returns dicts with at least 'id' and 'status' keys.
+        """
+        ...
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order by ID. Returns True if successful."""
+        ...
