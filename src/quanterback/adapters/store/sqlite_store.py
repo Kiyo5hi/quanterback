@@ -149,12 +149,36 @@ class SqliteStore:
         ]
 
     # --- positions ---
-    def upsert_position(self, p: "PersistedPosition") -> int:
+    def upsert_position(self, p: "PersistedPosition", *, broker_cancel_stale: object | None = None) -> int:
+        """Upsert a position. If broker_cancel_stale is provided, cancel stale Alpaca orders.
+
+        Args:
+            p: PersistedPosition to upsert
+            broker_cancel_stale: If provided, a callable(order_id: str) -> bool to cancel
+                                 stale orders before marking closed in DB.
+        """
         if p.id is None:
             # Supersede any stale 'pending' row for this ticker — Alpaca
             # never confirmed the previous submission, so treat as abandoned.
             # The partial UNIQUE INDEX idx_one_active_per_ticker forbids two
             # non-closed rows; this keeps the invariant under retry/race.
+
+            # First, cancel the old Alpaca order if broker is available
+            if broker_cancel_stale is not None:
+                old_order_ids = self._conn.execute(
+                    "SELECT order_id FROM positions WHERE ticker = ? AND state = 'pending'",
+                    (p.ticker,)
+                ).fetchall()
+                for row in old_order_ids:
+                    if row["order_id"]:
+                        try:
+                            broker_cancel_stale(str(row["order_id"]))
+                        except Exception as e:
+                            import logging
+                            log_instance = logging.getLogger(__name__)
+                            log_instance.warning("Failed to cancel stale order %s: %s",
+                                               row["order_id"], e)
+
             self._conn.execute(
                 "UPDATE positions SET state='closed', closed_at=?, "
                 "exit_reason='superseded_by_new_submit' "

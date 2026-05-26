@@ -39,12 +39,17 @@ class PositionTracker:
 
     def tick(self) -> dict:
         """Run one lifecycle tracking cycle. Idempotent."""
+        # Run reconciliation first to catch any drift from previous runs
+        from quanterback.adapters.lifecycle.reconciler import Reconciler
+        reconciler = Reconciler(broker=self.broker, store=self.store)
+        recon_report = reconciler.reconcile()
+
         now = datetime.now(tz=timezone.utc)
         after = now - timedelta(hours=self.lookback_hours)
 
         # Reap zombie pendings (Alpaca never confirmed fill within 1h).
-        # Done before lifecycle detection so capacity counts are accurate.
-        cleaned = self.store.cleanup_stale_pendings(max_age_hours=1.0)
+        # Now we cancel Alpaca-side orders before marking closed.
+        cleaned = self._cleanup_stale_pendings_with_cancel(max_age_hours=1.0)
         if cleaned:
             log.info("Reaped %d stale pending positions (>1h, no fill)", cleaned)
 
@@ -67,6 +72,11 @@ class PositionTracker:
             "closes": len(closes_detected),
             "open_positions": len(open_now),
             "pendings_reaped": cleaned,
+            "reconciliation": {
+                "orphans_cancelled": recon_report.orphan_orders_cancelled,
+                "manual_closes": recon_report.manual_closes_detected,
+                "unfilled_detected": recon_report.local_unfilled_orders_detected,
+            },
         }
 
     def _detect_opens(
@@ -210,6 +220,16 @@ class PositionTracker:
         )
         self.store.insert_trade(trade)
         self.store.mark_position_closed(cl["ticker"], cl["exit_at"], cl["exit_price"])
+        # Reconcile: verify the exit order actually exists in Alpaca (defense in depth)
+        # If somehow missing, log but don't fail the close
+        try:
+            if not self.broker.list_orders_after(cl["exit_at"] - timedelta(hours=1)):
+                log.warning(
+                    "Exit order %s for %s may not exist in Alpaca; marked closed anyway",
+                    cl["exit_order_id"], cl["ticker"]
+                )
+        except Exception as e:
+            log.warning("Exit order reconciliation check failed: %s", e)
         try:
             msg = self.i18n.render("position_closed", **cl)
             from quanterback.domain.events import NotificationEvent
@@ -221,3 +241,41 @@ class PositionTracker:
             self.notifier.push(evt)
         except Exception as e:
             log.warning("Failed to send close notification: %s", e)
+
+    def _cleanup_stale_pendings_with_cancel(self, max_age_hours: float = 1.0) -> int:
+        """Mark pending positions as closed AND cancel Alpaca orders.
+
+        This is the safe version of cleanup_stale_pendings() that cancels
+        Alpaca-side orders before marking local DB as closed.
+
+        Returns count of rows cleaned.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now(tz=timezone.utc)
+                  - timedelta(hours=max_age_hours)).isoformat()
+
+        # Fetch pending positions older than cutoff, with Alpaca order IDs
+        # (positions.order_id is DB FK to orders(id), need orders.alpaca_order_id)
+        pending = self.store._conn.execute(
+            "SELECT p.id, o.alpaca_order_id FROM positions p "
+            "LEFT JOIN orders o ON p.order_id = o.id "
+            "WHERE p.state = 'pending' AND p.opened_at < ?",
+            (cutoff,)
+        ).fetchall()
+
+        cancelled_count = 0
+        for row in pending:
+            alpaca_order_id = row["alpaca_order_id"]
+            if alpaca_order_id and self.broker.cancel_order(str(alpaca_order_id)):
+                cancelled_count += 1
+            elif alpaca_order_id:
+                log.warning("Failed to cancel stale order %s", alpaca_order_id)
+
+        # Now mark them closed in DB
+        cur = self.store._conn.execute(
+            "UPDATE positions SET state='closed', closed_at=?, "
+            "exit_reason='pending_timeout' "
+            "WHERE state = 'pending' AND opened_at < ?",
+            (datetime.now(tz=timezone.utc).isoformat(), cutoff),
+        )
+        return int(cur.rowcount or 0)

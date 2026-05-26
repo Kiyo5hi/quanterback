@@ -666,6 +666,39 @@ def cmd_track_positions(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """Reconcile local DB vs Alpaca state. Detects and fixes drift."""
+    _setup_logging()
+    config = _load_config()
+    store = SqliteStore(config.db_path)
+
+    from quanterback.adapters.execution.alpaca_broker import AlpacaPaperBroker
+    from quanterback.adapters.lifecycle.reconciler import Reconciler
+
+    broker = AlpacaPaperBroker(
+        api_key=config.alpaca_key, secret=config.alpaca_secret,
+    )
+    reconciler = Reconciler(broker=broker, store=store)
+
+    print("Reconciling local DB with Alpaca state...")
+    report = reconciler.reconcile()
+
+    print("\nReconciliation Report:")
+    print(f"  Orphan orders cancelled: {report.orphan_orders_cancelled}")
+    print(f"  Manual closes detected: {report.manual_closes_detected}")
+    print(f"  Unfilled orders detected: {report.local_unfilled_orders_detected}")
+
+    if not args.yes:
+        # Already done destructive actions; just report
+        if any([report.orphan_orders_cancelled, report.manual_closes_detected,
+                report.local_unfilled_orders_detected]):
+            print("\nActions were taken. Run 'quanterback report' to see updated state.")
+        else:
+            print("\nNo drift detected. All good!")
+
+    return 0
+
+
 def cmd_stress(args: argparse.Namespace) -> int:
     from datetime import date as _date
 
@@ -797,6 +830,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Override with comma-separated name:start:end (start/end YYYY-MM-DD)"
     )
     sub.add_parser("track-positions", help="Run one position lifecycle tracking tick")
+    reconcile_parser = sub.add_parser("reconcile", help="Reconcile local DB vs Alpaca state")
+    reconcile_parser.add_argument(
+        "--yes", action="store_true",
+        help="Skip confirmation (already takes destructive actions; flag is for future use)"
+    )
     cal_parser = sub.add_parser("calibration", help="LLM confidence vs realized outcomes")
     cal_parser.add_argument("--source", choices=["live", "replay"], default="live")
     cal_parser.add_argument("--days", type=int, default=None,
@@ -826,6 +864,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_stress(args)
     if args.command == "track-positions":
         return cmd_track_positions(args)
+    if args.command == "reconcile":
+        return cmd_reconcile(args)
     if args.command == "calibration":
         return cmd_calibration(args)
     return 1

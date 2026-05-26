@@ -58,15 +58,29 @@ class AlpacaPaperBroker:
     def __init__(self, *, api_key: str, secret: str) -> None:
         self._client: Any = TradingClient(api_key, secret, paper=True)
 
-    def submit(self, spec: BracketOrderSpec, *, dry_run: bool) -> ExecutionResult:
+    def submit(self, spec: BracketOrderSpec, *, dry_run: bool, decision_id: int | None = None) -> ExecutionResult:
         if dry_run:
             return ExecutionResult(
                 submitted=False, order_id=None, error=None,
                 raw_response={"dry_run": True, "spec": spec.model_dump()},
             )
-        order_request = self._build_request(spec)
+        order_request = self._build_request(spec, decision_id=decision_id)
         try:
             order = self._client.submit_order(order_request)
+
+            # Check order status post-submit for immediate rejection
+            status = str(getattr(order, "status", "unknown")).lower()
+            if status in ("rejected", "expired", "canceled"):
+                log.warning(
+                    "Order %s submitted but rejected with status=%s; treating as failed",
+                    order.id, status
+                )
+                return ExecutionResult(
+                    submitted=False, order_id=None,
+                    error=f"order rejected: status={status}",
+                    raw_response={"id": str(order.id), "status": status},
+                )
+
             # Note: trailing stop NOT submitted separately when bracket has stop_loss.
             # Bracket's stop_loss leg is sufficient; Alpaca rejects separate SELL orders
             # while bracket's child SELLs are open (conflicts with atomic order semantics).
@@ -80,8 +94,7 @@ class AlpacaPaperBroker:
                 _trail_warned_global = True
             return ExecutionResult(
                 submitted=True, order_id=str(order.id), error=None,
-                raw_response={"id": str(order.id),
-                              "status": getattr(order, "status", "unknown")},
+                raw_response={"id": str(order.id), "status": status},
             )
         except Exception as e:
             return ExecutionResult(
@@ -247,7 +260,7 @@ class AlpacaPaperBroker:
             return None
 
     @staticmethod
-    def _build_request(spec: BracketOrderSpec) -> Any:
+    def _build_request(spec: BracketOrderSpec, decision_id: int | None = None) -> Any:
         tp = TakeProfitRequest(limit_price=spec.take_profit_price)
         sl = StopLossRequest(stop_price=spec.stop_loss_price)
         common = dict(
@@ -255,6 +268,11 @@ class AlpacaPaperBroker:
             time_in_force=TimeInForce.GTC,
             order_class="bracket", take_profit=tp, stop_loss=sl,
         )
+        # Set client_order_id for idempotency: if we retry after a network failure,
+        # Alpaca will deduplicate based on this ID, not create a duplicate order.
+        if decision_id is not None:
+            common["client_order_id"] = f"qb-{decision_id}"
+
         if spec.entry_type == "market":
             return MarketOrderRequest(**common)
         return LimitOrderRequest(**common, limit_price=spec.limit_price)

@@ -287,6 +287,15 @@ class ScanPipeline:
         return run_id
 
     def _process_event(self, event: ScanEvent, *, run_id: int, dry_run: bool) -> None:
+        # Reconcile before checking if we can open new positions (defense in depth)
+        # This catches any drift from previous runs and frees up capacity
+        try:
+            from quanterback.adapters.lifecycle.reconciler import Reconciler
+            reconciler = Reconciler(broker=self.executor, store=self.state_store)
+            reconciler.reconcile()
+        except Exception as e:
+            log.warning("Pre-event reconciliation failed: %s", e)
+
         if len(self.state_store.query_open_lifecycles()) >= self.max_concurrent_positions:
             self._persist_rejection(run_id, event.ticker, "max_concurrent_positions reached")
             return
@@ -434,7 +443,7 @@ class ScanPipeline:
         account_value = self.executor.get_account_value()
         spec = self.order_builder.build(decision, summary, account_value,
                                          size_multiplier=assessment.size_multiplier)
-        result = self.executor.submit(spec, dry_run=dry_run)
+        result = self.executor.submit(spec, dry_run=dry_run, decision_id=dec_id)
         order_id = self.state_store.insert_order(PersistedOrder(
             decision_id=dec_id, backtest_id=bt_id,
             bracket_spec_json=spec.model_dump_json(),
@@ -448,12 +457,15 @@ class ScanPipeline:
             "dry_run": dry_run, "order_id": result.order_id,
         })
         if result.submitted and result.order_id:
-            self.state_store.upsert_position(PersistedPosition(
-                ticker=event.ticker, order_id=order_id, state="pending",
-                entry_price=None, sl=spec.stop_loss_price, tp=spec.take_profit_price,
-                qty=spec.qty, opened_at=datetime.now(tz=timezone.utc),
-                decision_id=dec_id,
-            ))
+            self.state_store.upsert_position(
+                PersistedPosition(
+                    ticker=event.ticker, order_id=order_id, state="pending",
+                    entry_price=None, sl=spec.stop_loss_price, tp=spec.take_profit_price,
+                    qty=spec.qty, opened_at=datetime.now(tz=timezone.utc),
+                    decision_id=dec_id,
+                ),
+                broker_cancel_stale=self.executor.cancel_order,
+            )
 
     def _persist_rejection(self, run_id: int, ticker: str, reason: str) -> None:
         self.state_store.insert_decision(PersistedDecision(
