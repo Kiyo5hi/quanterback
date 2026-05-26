@@ -43,7 +43,7 @@ def render_scan_brief(
         )
 
     decisions_rows = conn.execute("""
-        SELECT id, ticker, summary_json, decision_json, rejected_reason, llm_model, agent_debate_json
+        SELECT id, ticker, summary_json, decision_json, rejected_reason, agent_debate_json
         FROM decisions WHERE scan_run_id = ? ORDER BY id
     """, (latest_run["id"],)).fetchall()
 
@@ -70,9 +70,6 @@ def render_scan_brief(
         log.warning("Failed to fetch watchlist: %s", e)
         watchlist = []
         wl_counts = {"config": 0, "user": 0, "auto": 0}
-
-    # SPY trend if available
-    spy_trend = "unknown"
 
     # Compute current time
     now = datetime.now(tz=timezone.utc)
@@ -102,7 +99,6 @@ def render_scan_brief(
         n_processed=latest_run["tickers_processed"] or 0,
         n_errors=latest_run["errors_count"] or 0,
         trigger_label=trigger_label,
-        spy_trend=spy_trend,
         benchmark_ticker=getattr(config, "benchmark_ticker", "VOO"),
         wl_total=len(watchlist),
         wl_counts=wl_counts,
@@ -249,7 +245,6 @@ def _empty_ctx() -> dict:
         "n_processed": 0,
         "n_errors": 0,
         "trigger_label": "",
-        "spy_trend": "",
         "wl_total": 0,
         "wl_counts": {},
         "buys": [],

@@ -98,11 +98,6 @@ class TelegramNotifier:
                 label = "Not submitted"
             return f"{emoji} Order — *{ticker}*\n_{ts}_\n{label}"
 
-        if kind == "fill":
-            ticker = payload.get("ticker", "?")
-            json_text = json.dumps(payload, ensure_ascii=False, indent=2)[:600]
-            return f"💰 Fill — *{ticker}*\n_{ts}_\n```\n{json_text}\n```"
-
         if kind == "scan_summary":
             processed = payload.get("processed", 0)
             errors = payload.get("errors", 0)

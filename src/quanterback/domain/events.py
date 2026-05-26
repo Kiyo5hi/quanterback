@@ -44,8 +44,8 @@ class NotificationEvent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: Literal[
-        "decision", "backtest", "order", "fill", "scan_summary", "error",
-        "position.opened", "position.closed",
+        "decision", "backtest", "order", "scan_summary", "error",
+        "position.opened", "position.closed", "position_management",
     ]
     payload: dict
     timestamp: datetime

@@ -293,12 +293,12 @@ class SqliteStore:
         cur = self._conn.execute(
             "INSERT INTO trades (exit_order_id, ticker, side, qty, entry_price, "
             "entry_at, exit_price, exit_at, exit_reason, pnl_usd, pnl_pct, "
-            "holding_hours, decision_id, notes, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "holding_hours, decision_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (t.exit_order_id, t.ticker, t.side, t.qty, t.entry_price,
              t.entry_at.isoformat(), t.exit_price, t.exit_at.isoformat(),
              t.exit_reason, t.pnl_usd, t.pnl_pct, t.holding_hours,
-             t.decision_id, t.notes, created_at.isoformat()),
+             t.decision_id, created_at.isoformat()),
         )
         return int(cur.lastrowid or 0)
 
@@ -313,7 +313,7 @@ class SqliteStore:
         rows = self._conn.execute(
             "SELECT id, exit_order_id, ticker, side, qty, entry_price, entry_at, "
             "exit_price, exit_at, exit_reason, pnl_usd, pnl_pct, holding_hours, "
-            "decision_id, notes, created_at "
+            "decision_id, created_at "
             "FROM trades ORDER BY exit_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
@@ -325,7 +325,7 @@ class SqliteStore:
                 exit_price=r["exit_price"], exit_at=datetime.fromisoformat(r["exit_at"]),
                 exit_reason=r["exit_reason"], pnl_usd=r["pnl_usd"],
                 pnl_pct=r["pnl_pct"], holding_hours=r["holding_hours"],
-                decision_id=r["decision_id"], notes=r["notes"],
+                decision_id=r["decision_id"],
                 created_at=datetime.fromisoformat(r["created_at"]),
             )
             for r in rows

@@ -114,7 +114,6 @@ CREATE TABLE IF NOT EXISTS trades (
   pnl_pct REAL NOT NULL,
   holding_hours REAL NOT NULL,
   decision_id INTEGER,
-  notes TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trades_exit_at ON trades(exit_at);
@@ -153,6 +152,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     _migrate_add_decision_id_to_positions(conn)
     _migrate_add_agent_debate_to_decisions(conn)
     _migrate_add_trigger_label_to_scan_runs(conn)
+    _migrate_drop_notes_column_from_trades(conn)
 
 
 def _migrate_add_decision_id_to_positions(conn: sqlite3.Connection) -> None:
@@ -180,6 +180,23 @@ def _migrate_add_trigger_label_to_scan_runs(conn: sqlite3.Connection) -> None:
     if "trigger_label" not in columns:
         conn.execute("ALTER TABLE scan_runs ADD COLUMN trigger_label TEXT DEFAULT ''")
         conn.commit()
+
+
+def _migrate_drop_notes_column_from_trades(conn: sqlite3.Connection) -> None:
+    """Idempotent migration: drop notes column from trades if present.
+
+    Requires SQLite 3.35+ for ALTER TABLE DROP COLUMN. Older versions silently
+    skip the drop (column remains but is no longer read/written).
+    """
+    cursor = conn.execute("PRAGMA table_info(trades)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "notes" in columns:
+        try:
+            conn.execute("ALTER TABLE trades DROP COLUMN notes")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # SQLite < 3.35; leave the column orphaned — store no longer touches it.
+            pass
 
 
 def seed_watchlist_from_config_file(

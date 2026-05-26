@@ -5,7 +5,7 @@
 {% else %}📋 *QuanterBack 扫描简报* — {{ now }}
 {% endif %}模式: {{ mode }}  ·  标的: {{ n_processed }}  ·  错误: {{ n_errors }}
 触发: {{ trigger_label }}
-大盘: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: {{ wl_total }} (配置:{{ wl_counts.config }}, 用户:{{ wl_counts.user }}, 自动:{{ wl_counts.auto }})
+大盘: {{ benchmark_ticker | default('VOO') }}  ·  Watchlist: {{ wl_total }} (配置:{{ wl_counts.config }}, 用户:{{ wl_counts.user }}, 自动:{{ wl_counts.auto }})
 
 {% if buys %}═══ 🟢 *BUY* ({{ buys | length }}) ═══
 {% for b in buys %}

@@ -79,7 +79,6 @@ class AppConfig:
     # position management
     position_management_enabled: bool
     position_management_min_age_hours: float
-    position_management_reeval_interval_hours: float
 
     @classmethod
     def load(cls, toml_paths: list[Path] | None = None) -> AppConfig:
@@ -204,7 +203,6 @@ class AppConfig:
             position_tracker_lookback_hours=int(position_tracker.get("lookback_hours", 48)),
             position_management_enabled=bool(position_management.get("enabled", False)),
             position_management_min_age_hours=float(position_management.get("min_age_hours", 6.0)),
-            position_management_reeval_interval_hours=float(position_management.get("reeval_interval_hours", 4.0)),
         )
         # Set universe dynamic fields on frozen instance using object.__setattr__
         object.__setattr__(instance, "universe_screener_enabled", bool(universe.get("enabled", True)))

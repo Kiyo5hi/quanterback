@@ -5,7 +5,7 @@
 {% else %}📋 *QuanterBack Scan Brief* — {{ now }}
 {% endif %}Mode: {{ mode }}  ·  Tickers: {{ n_processed }}  ·  Errors: {{ n_errors }}
 Trigger: {{ trigger_label }}
-Market: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: {{ wl_total }} (config:{{ wl_counts.config }}, user:{{ wl_counts.user }}, auto:{{ wl_counts.auto }})
+Market: {{ benchmark_ticker | default('VOO') }}  ·  Watchlist: {{ wl_total }} (config:{{ wl_counts.config }}, user:{{ wl_counts.user }}, auto:{{ wl_counts.auto }})
 
 {% if buys %}═══ 🟢 *BUY* ({{ buys | length }}) ═══
 {% for b in buys %}

@@ -13,7 +13,6 @@ from quanterback.adapters.control.telegram_control_channel import (
 from quanterback.adapters.data.rule_based_summarizer import RuleBasedSummarizer
 from quanterback.adapters.data.yfinance_provider import YFinanceProvider
 from quanterback.adapters.decision.ark_client import ArkClient
-from quanterback.adapters.decision.cached_llm_client import CachedLLMClient
 from quanterback.adapters.decision.claude_client import ClaudeClient
 from quanterback.adapters.decision.multi_agent_strategist import MultiAgentStrategist
 from quanterback.adapters.decision.noop_approval_gate import NoOpApprovalGate
@@ -42,7 +41,6 @@ from quanterback.adapters.risk.vectorized_backtester import VectorizedBacktester
 from quanterback.adapters.state.sqlite_system_state import SqliteSystemStateService
 from quanterback.adapters.store.sqlite_store import SqliteStore
 from quanterback.config import AppConfig
-from quanterback.domain.persisted import PersistedUserTrigger
 from quanterback.i18n import I18n
 from quanterback.interfaces.decision import ApprovalGate, LLMClient, LLMStrategist
 from quanterback.interfaces.risk import RiskGate
@@ -74,9 +72,7 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
             api_key=config.anthropic_key, model=config.llm_model,
             thinking_effort=config.llm_thinking_effort,
         )
-    # Wrap with in-memory cache so repeat queries (e.g., same ticker re-asked
-    # within a manual /scan triggered by Telegram) don't re-bill tokens.
-    llm_client: LLMClient = CachedLLMClient(wrapped=base_llm)
+    llm_client: LLMClient = base_llm
 
     strategist: LLMStrategist = MultiAgentStrategist(
         llm_client,

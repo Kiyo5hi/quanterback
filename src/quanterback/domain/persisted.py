@@ -107,5 +107,4 @@ class PersistedTrade(BaseModel):
     pnl_pct: float
     holding_hours: float
     decision_id: int | None = None
-    notes: str = ""
     created_at: datetime | None = None
