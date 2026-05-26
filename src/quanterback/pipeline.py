@@ -86,6 +86,9 @@ class ScanPipeline:
             log.info("System halted; exiting without scan.")
             return None
         dry_run = force_dry_run or (st.mode == "frozen")
+        # /preview semantics: explicit force_dry_run (not frozen) stops after
+        # decision — user wants the AI view, not a paper-ledger entry.
+        preview_only = force_dry_run and st.mode != "frozen"
 
         run = ScanRun(started_at=datetime.now(tz=timezone.utc), source="user_trigger",
                       trigger_label=trigger_label)
@@ -149,7 +152,7 @@ class ScanPipeline:
                     priority=10,
                     requested_at=datetime.now(tz=timezone.utc),
                 )
-                self._process_event(event, run_id=run_id, dry_run=dry_run)
+                self._process_event(event, run_id=run_id, dry_run=dry_run, preview_only=preview_only)
             except Exception as exc:
                 errors += 1
                 log.exception("Ticker %s failed in scan", ticker)
@@ -187,6 +190,7 @@ class ScanPipeline:
             log.info("System halted; exiting without scan.")
             return None
         dry_run = force_dry_run or (st.mode == "frozen")
+        preview_only = force_dry_run and st.mode != "frozen"
 
         run = ScanRun(started_at=datetime.now(tz=timezone.utc), source="cron", trigger_label="cron")
         run_id = self.state_store.insert_scan_run(run)
@@ -242,7 +246,7 @@ class ScanPipeline:
             seen_tickers.add(event.ticker)
             processed += 1
             try:
-                self._process_event(event, run_id=run_id, dry_run=dry_run)
+                self._process_event(event, run_id=run_id, dry_run=dry_run, preview_only=preview_only)
             except Exception as exc:
                 errors += 1
                 log.exception("Ticker %s failed in scan", event.ticker)
@@ -291,7 +295,7 @@ class ScanPipeline:
                 log.exception("Watchlist auto-management failed: %s", e)
         return run_id
 
-    def _process_event(self, event: ScanEvent, *, run_id: int, dry_run: bool) -> None:
+    def _process_event(self, event: ScanEvent, *, run_id: int, dry_run: bool, preview_only: bool = False) -> None:
         # Reconcile before checking if we can open new positions (defense in depth)
         # This catches any drift from previous runs and frees up capacity.
         # Failures are logged but don't block the scan (production safety).
@@ -305,12 +309,16 @@ class ScanPipeline:
         except Exception as e:
             log.warning("Pre-event reconciliation failed (continuing scan): %s", e)
 
-        if len(self.state_store.query_open_lifecycles()) >= self.max_concurrent_positions:
-            self._persist_rejection(run_id, event.ticker, "max_concurrent_positions reached")
-            return
-        if self.position_state.has_open_lifecycle(event.ticker):
-            self._persist_rejection(run_id, event.ticker, "ticker has open lifecycle")
-            return
+        # Skip portfolio-state gates only for /preview (analysis-only flow):
+        # user wants the LLM's view on the ticker regardless of current holdings.
+        # Frozen-mode dry_run still respects these gates for audit fidelity.
+        if not preview_only:
+            if len(self.state_store.query_open_lifecycles()) >= self.max_concurrent_positions:
+                self._persist_rejection(run_id, event.ticker, "max_concurrent_positions reached")
+                return
+            if self.position_state.has_open_lifecycle(event.ticker):
+                self._persist_rejection(run_id, event.ticker, "ticker has open lifecycle")
+                return
 
         window = self.data_provider.fetch(event.ticker)
         news: list = []
@@ -425,6 +433,13 @@ class ScanPipeline:
         })
 
         if decision.action != "BUY":
+            return
+
+        # /preview path: LLM decision is persisted with full agent debate;
+        # brief will render it. Skip downstream gates + order construction —
+        # user wants the AI's view, not "would this trade execute".
+        # Frozen-mode dry_run does NOT short-circuit (full ledger preserved).
+        if preview_only:
             return
 
         approval = self.approval_gate.review(decision)

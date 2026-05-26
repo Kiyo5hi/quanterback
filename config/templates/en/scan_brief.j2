@@ -1,8 +1,9 @@
 {% if error == "no_scan" %}
 (No scan runs found in store. Run a scan first.)
 {% else %}
-📋 *QuanterBack Scan Brief* — {{ now }}
-Mode: {{ mode }}  ·  Tickers: {{ n_processed }}  ·  Errors: {{ n_errors }}
+{% if is_dry_run %}📊 *QuanterBack Analysis Report (no trades)* — {{ now }}
+{% else %}📋 *QuanterBack Scan Brief* — {{ now }}
+{% endif %}Mode: {{ mode }}  ·  Tickers: {{ n_processed }}  ·  Errors: {{ n_errors }}
 Trigger: {{ trigger_label }}
 Market: {{ benchmark_ticker | default('VOO') }} {{ spy_trend }}  ·  Watchlist: {{ wl_total }} (config:{{ wl_counts.config }}, user:{{ wl_counts.user }}, auto:{{ wl_counts.auto }})
 

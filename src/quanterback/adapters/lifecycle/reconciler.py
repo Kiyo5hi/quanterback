@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from quanterback.interfaces.lifecycle import BrokerLifecyclePort
 from quanterback.interfaces.store import StateStore
@@ -70,12 +70,29 @@ class Reconciler:
             MIN_AGE_BEFORE_RECONCILE = timedelta(minutes=10)
             now = datetime.now(tz=timezone.utc)
 
+            # If a ticker has a recent broker exit order, the position likely closed
+            # via SL/TP — PositionTracker will record the real fill. Reconciler's
+            # "manual_close" path would zero out exit_price, so skip those tickers.
+            recent_exit_tickers: set[str] = set()
+            try:
+                lookback = now - timedelta(hours=24)
+                for o in self.broker.list_orders_after(lookback):
+                    side = getattr(o, "side", "")
+                    filled_qty = getattr(o, "filled_qty", 0) or 0
+                    ticker = getattr(o, "ticker", "")
+                    if side == "sell" and filled_qty > 0 and ticker:
+                        recent_exit_tickers.add(str(ticker).upper())
+            except Exception:
+                pass
+
             for pos in local_open:
                 if pos.state not in HELD_STATES:
                     continue
                 if pos.opened_at and (now - pos.opened_at) < MIN_AGE_BEFORE_RECONCILE:
                     continue
                 if pos.ticker in alpaca_tickers:
+                    continue
+                if pos.ticker.upper() in recent_exit_tickers:
                     continue
                 log.warning(
                     "Position %s is in DB (state=%s, opened %s ago) but not in "

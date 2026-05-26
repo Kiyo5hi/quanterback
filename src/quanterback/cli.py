@@ -218,12 +218,13 @@ def cmd_scan(args: argparse.Namespace) -> int:
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
-    closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
-    if closed_msg is not None:
-        print(closed_msg)
-        return 0
-
     dry_run = getattr(args, "dry_run", False)
+    if not dry_run:
+        closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
+        if closed_msg is not None:
+            print(closed_msg)
+            return 0
+
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
         ticker_str = ",".join(tickers)
@@ -249,10 +250,12 @@ def cmd_rescan(args: argparse.Namespace) -> int:
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
 
-    closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
-    if closed_msg is not None:
-        print(closed_msg)
-        return 0
+    dry_run = getattr(args, "dry_run", False)
+    if not dry_run:
+        closed_msg = _check_market_or_explain(pipeline.executor, config, i18n)
+        if closed_msg is not None:
+            print(closed_msg)
+            return 0
 
     # Read watchlist and extract tickers
     entries = store.list_watchlist()
@@ -273,7 +276,6 @@ def cmd_rescan(args: argparse.Namespace) -> int:
         )
 
     # Run pipeline for these tickers
-    dry_run = getattr(args, "dry_run", False)
     dry_prefix = "[DRY] " if dry_run else ""
     scan_run_id = pipeline.run_for_tickers(tickers, trigger_label=f"{dry_prefix}/rescan", force_dry_run=dry_run)
 

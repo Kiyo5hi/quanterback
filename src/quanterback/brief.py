@@ -91,11 +91,14 @@ def render_scan_brief(
     elif trigger_label == "user_trigger":
         trigger_label = "用户触发" if config.language == "zh" else "user trigger"
 
+    is_dry_run = isinstance(trigger_label, str) and "[DRY]" in trigger_label
+
     return i18n.render(
         "scan_brief",
         error=None,
         now=i18n.format_dt(now, "%Y-%m-%d %H:%M %Z"),
-        mode=getattr(config, "mode", "live"),
+        mode="dry-run" if is_dry_run else getattr(config, "mode", "live"),
+        is_dry_run=is_dry_run,
         n_processed=latest_run["tickers_processed"] or 0,
         n_errors=latest_run["errors_count"] or 0,
         trigger_label=trigger_label,
