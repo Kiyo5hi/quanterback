@@ -54,34 +54,49 @@ class Reconciler:
             log.exception("Orphan order check failed: %s", e)
 
         # 2. Check for manually-closed positions (in local DB but not in Alpaca)
+        # Only fires for positions in actively-held states (bracket_active / filled / open)
+        # AND only if we successfully also queried open orders — partial data collection
+        # must not cause aggressive closes (would race with brand-new submits that haven't
+        # appeared in Alpaca's positions list yet).
         try:
             alpaca_positions = self.broker.list_positions()
             alpaca_tickers = {p.ticker for p in alpaca_positions}
             local_open = self.store.get_open_positions()
+            # Active states only — pending positions are handled by step #3 (order-level)
+            # and by cleanup_stale_pendings, not by this manual-close heuristic.
+            HELD_STATES = ("bracket_active", "filled", "open")
+            # Grace period: don't close positions opened less than N minutes ago — Alpaca
+            # has a fill-propagation delay; a 30s-old pending might not be in positions yet.
+            MIN_AGE_BEFORE_RECONCILE = timedelta(minutes=10)
+            now = datetime.now(tz=timezone.utc)
 
             for pos in local_open:
-                if pos.ticker not in alpaca_tickers:
-                    # Position closed in Alpaca but still marked open in DB
-                    log.warning(
-                        "Position %s is in DB (state=%s) but not in Alpaca — "
-                        "marking closed as reconciled",
-                        pos.ticker, pos.state
+                if pos.state not in HELD_STATES:
+                    continue
+                if pos.opened_at and (now - pos.opened_at) < MIN_AGE_BEFORE_RECONCILE:
+                    continue
+                if pos.ticker in alpaca_tickers:
+                    continue
+                log.warning(
+                    "Position %s is in DB (state=%s, opened %s ago) but not in "
+                    "Alpaca — marking closed as reconciled",
+                    pos.ticker, pos.state,
+                    (now - pos.opened_at) if pos.opened_at else "unknown"
+                )
+                self.store.mark_position_closed(
+                    pos.ticker,
+                    closed_at=datetime.now(tz=timezone.utc),
+                    exit_price=0.0,
+                )
+                try:
+                    self.store._conn.execute(
+                        "UPDATE positions SET exit_reason='reconciled_manual_close' "
+                        "WHERE ticker=? AND state='closed'",
+                        (pos.ticker,)
                     )
-                    self.store.mark_position_closed(
-                        pos.ticker,
-                        closed_at=datetime.now(tz=timezone.utc),
-                        exit_price=0.0,
-                    )
-                    # Update exit reason to mark as reconciliation
-                    try:
-                        self.store._conn.execute(
-                            "UPDATE positions SET exit_reason='reconciled_manual_close' "
-                            "WHERE ticker=? AND state='closed'",
-                            (pos.ticker,)
-                        )
-                    except Exception:
-                        pass
-                    report.manual_closes_detected += 1
+                except Exception:
+                    pass
+                report.manual_closes_detected += 1
         except Exception as e:
             log.exception("Manual close check failed: %s", e)
 

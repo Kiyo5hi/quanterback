@@ -73,12 +73,21 @@ class FakeBroker:
     def __init__(self):
         self.positions: list = []
         self.orders: list = []
+        self.cancelled: list[str] = []
 
     def list_positions(self):
         return list(self.positions)
 
     def list_orders_after(self, after: datetime):
         return [o for o in self.orders if (o.filled_at or o.submitted_at) >= after]
+
+    def list_all_orders(self, status: str | None = None, after: datetime | None = None) -> list[dict]:
+        # Reconciler expects dict shape with id/status. Empty by default.
+        return []
+
+    def cancel_order(self, order_id: str) -> bool:
+        self.cancelled.append(order_id)
+        return True
 
 
 class FakeNotifier:

@@ -6,15 +6,26 @@ from pathlib import Path
 
 from quanterback.i18n import I18n
 
-REAL_TEMPLATES_DIR = Path(__file__).parent.parent / "config" / "templates"
+_CANDIDATE_TEMPLATES_DIRS = [
+    Path(__file__).parent.parent / "config" / "templates",  # repo root (CI / dev)
+    Path("/config/templates"),                              # container mount
+]
+
+
+def _find_templates_dir() -> Path | None:
+    for p in _CANDIDATE_TEMPLATES_DIRS:
+        if p.exists():
+            return p
+    return None
 
 
 @pytest.fixture
 def real_templates_dir() -> Path:
     """Always returns the real templates dir. Tests must handle the real template's vars."""
-    if not REAL_TEMPLATES_DIR.exists():
-        pytest.skip(f"Templates dir not found at {REAL_TEMPLATES_DIR}")
-    return REAL_TEMPLATES_DIR
+    found = _find_templates_dir()
+    if found is None:
+        pytest.skip(f"Templates dir not found in any of: {_CANDIDATE_TEMPLATES_DIRS}")
+    return found
 
 
 @pytest.fixture
