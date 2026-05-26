@@ -46,16 +46,15 @@ chat_ids = [YOUR_TELEGRAM_CHAT_ID_HERE]
 # min_equity = 25000.0
 # max_day_trades = 3
 
+# [position_management]
+# enabled = true        # Run PositionManagementAgent at end of each scan
+# min_age_hours = 6.0   # Skip positions younger than this
+
 # [llm]
 # model = "claude-opus-4-6"  # Use Opus for more complex analysis
 # temperature = 0.2
 # thinking_effort = "low"  # "off" / "low" / "medium" / "high"
-# strategist_mode = "single"  # "single" or "multi_agent"
 # agent_parallel = false  # Run agents sequentially (cheaper, slower)
-
-# [approval]
-# gate = "telegram"  # Require /yes from Telegram before BUY orders
-# timeout_seconds = 120
 
 # [language]
 # Set language for agent prompts + Telegram responses

@@ -107,25 +107,6 @@ def test_load_ark_provider_missing_ark_key_raises(tmp_path: Path) -> None:
         AppConfig.load(toml_paths=[toml])
 
 
-def test_load_with_telegram_approval_gate(tmp_path: Path) -> None:
-    toml = tmp_path / "c.toml"
-    toml.write_text(
-        _minimal_secrets_toml() +
-        '[approval]\ngate = "telegram"\ntimeout_seconds = 120\n'
-    )
-    cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.approval_gate == "telegram"
-    assert cfg.approval_timeout_seconds == 120
-
-
-def test_load_defaults_approval_to_noop(tmp_path: Path) -> None:
-    toml = tmp_path / "c.toml"
-    toml.write_text(_minimal_secrets_toml())
-    cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.approval_gate == "noop"
-    assert cfg.approval_timeout_seconds == 60
-
-
 def test_secrets_from_toml(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(

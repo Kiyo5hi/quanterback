@@ -53,7 +53,6 @@ class AppConfig:
     llm_temperature: float
     llm_thinking_effort: Literal["off", "low", "medium", "high"]
     prompt_template_path: Path
-    strategist_mode: Literal["single", "multi_agent"]
     prompts_dir: Path
     agent_parallel: bool
 
@@ -64,10 +63,6 @@ class AppConfig:
     # telegram
     tg_chat_ids: tuple[str, ...]
     notifier_retry_window_hours: int
-
-    # approval
-    approval_gate: Literal["noop", "telegram"]
-    approval_timeout_seconds: int
 
     # storage
     db_path: Path
@@ -121,7 +116,6 @@ class AppConfig:
             )
         data = merged.get("data", {})
         telegram = merged.get("telegram", {})
-        approval = merged.get("approval", {})
         storage = merged.get("storage", {})
         alpaca = merged.get("alpaca", {})
         i18n = merged.get("i18n", {})
@@ -203,15 +197,12 @@ class AppConfig:
             prompt_template_path=Path(
                 llm.get("prompt_template_path", "/config/prompts/momentum_strategist.md")
             ),
-            strategist_mode=str(llm.get("strategist_mode", "multi_agent")),  # type: ignore[arg-type]
             prompts_dir=Path(llm.get("prompts_dir", "/config/prompts")),
             agent_parallel=bool(llm.get("agent_parallel", True)),
             cache_dir=Path(data.get("cache_dir", "/data/cache")),
             cache_ttl_hours=int(data.get("cache_ttl_hours", 4)),
             tg_chat_ids=tuple(str(c) for c in telegram.get("chat_ids", [])),
             notifier_retry_window_hours=int(telegram.get("retry_window_hours", 1)),
-            approval_gate=str(approval.get("gate", "noop")),  # type: ignore[arg-type]
-            approval_timeout_seconds=int(approval.get("timeout_seconds", 60)),
             db_path=Path(storage.get("db_path", "/data/quanterback.sqlite")),
             language=_validate_language(i18n.get("language", "en")),
             templates_dir=Path(i18n.get("templates_dir", "/config/templates")),
@@ -219,7 +210,7 @@ class AppConfig:
             position_tracker_enabled=bool(position_tracker.get("enabled", True)),
             position_tracker_lookback_hours=int(position_tracker.get("lookback_hours", 48)),
             position_management_enabled=bool(position_management.get("enabled", False)),
-            position_management_min_age_hours=float(position_management.get("min_age_hours_before_eval", 6.0)),
+            position_management_min_age_hours=float(position_management.get("min_age_hours", 6.0)),
             position_management_reeval_interval_hours=float(position_management.get("reeval_interval_hours", 4.0)),
             watchlist_auto_enabled=bool(watchlist_auto.get("enabled", True)),
             watchlist_promote_min_buys=int(watchlist_auto.get("promote_min_buys", 3)),

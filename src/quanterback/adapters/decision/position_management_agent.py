@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from pydantic import BaseModel
 
-from quanterback.adapters.decision.prompted_strategist import _strip_markdown_fences
+from quanterback.adapters.decision.multi_agent_strategist import _strip_markdown_fences
 from quanterback.domain.market import CondensedSummary
 from quanterback.interfaces.decision import ChatMessage, LLMClient
 

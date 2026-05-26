@@ -29,6 +29,13 @@ max_total_exposure_pct = 0.95
 # (e.g., 3 ai_semi positions if all pass gates).
 max_sector_exposure_pct = 0.30
 
+[position_management]
+# When true, runs PositionManagementAgent at end of each scan to re-evaluate
+# held positions (HOLD / TIGHTEN_SL / TRIM_HALF / EXIT_NOW). Default disabled
+# because the agent code shipped before its DB schema; now safe to enable.
+enabled = true
+min_age_hours = 6.0
+
 [risk.sl_tp]
 sl_atr_multiple = 1.5
 tp_atr_multiple = 3.0
@@ -70,8 +77,6 @@ temperature = 0.0
 # doubao-1-5-thinking-pro/deepseek-r1/claude-* do.
 thinking_effort = "off"
 prompt_template_path = "/config/prompts/momentum_strategist.md"
-# Strategist mode: "single" (legacy PromptedLLMStrategist) or "multi_agent" (4-agent TradingAgents pattern)
-strategist_mode = "multi_agent"
 # Directory containing agent prompt templates (used by multi_agent mode)
 prompts_dir = "/config/prompts"
 # Whether to run analyst agents in parallel (faster wall-clock, costs 4x LLM calls)
@@ -91,12 +96,6 @@ cache_ttl_hours = 4
 chat_ids = []
 retry_window_hours = 1
 # bot_token = ""    # set in local.toml or TELEGRAM_BOT_TOKEN env
-
-[approval]
-# "noop" = NoOpApprovalGate (always approve, v0 default)
-# "telegram" = TelegramApprovalGate (requires /yes from TG before BUY)
-gate = "noop"
-timeout_seconds = 60
 
 [storage]
 db_path = "/data/quanterback.sqlite"

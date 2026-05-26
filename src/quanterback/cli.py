@@ -17,8 +17,6 @@ from quanterback.adapters.decision.cached_llm_client import CachedLLMClient
 from quanterback.adapters.decision.claude_client import ClaudeClient
 from quanterback.adapters.decision.multi_agent_strategist import MultiAgentStrategist
 from quanterback.adapters.decision.noop_approval_gate import NoOpApprovalGate
-from quanterback.adapters.decision.prompted_strategist import PromptedLLMStrategist
-from quanterback.adapters.decision.telegram_approval_gate import TelegramApprovalGate
 from quanterback.adapters.events.composite_event_source import CompositeEventSource
 from quanterback.adapters.events.universe_screener_event_source import (
     UniverseScreenerEventSource,
@@ -86,27 +84,13 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
     # within a manual /scan triggered by Telegram) don't re-bill tokens.
     llm_client: LLMClient = CachedLLMClient(wrapped=base_llm)
 
-    strategist: LLMStrategist
-    if config.strategist_mode == "multi_agent":
-        strategist = MultiAgentStrategist(
-            llm_client,
-            prompts_dir=config.prompts_dir,
-            language=config.language,
-            parallel=config.agent_parallel,
-        )
-    else:
-        strategist = PromptedLLMStrategist(
-            llm_client, prompt_template_path=config.prompt_template_path,
-            temperature=config.llm_temperature,
-        )
-    approval_gate: ApprovalGate
-    if config.approval_gate == "telegram":
-        approval_gate = TelegramApprovalGate(
-            token=config.tg_token, chat_ids=config.tg_chat_ids,
-            timeout_seconds=config.approval_timeout_seconds,
-        )
-    else:
-        approval_gate = NoOpApprovalGate()
+    strategist: LLMStrategist = MultiAgentStrategist(
+        llm_client,
+        prompts_dir=config.prompts_dir,
+        language=config.language,
+        parallel=config.agent_parallel,
+    )
+    approval_gate: ApprovalGate = NoOpApprovalGate()
     backtester = VectorizedBacktester(data_provider)
     order_builder = ATRBracketOrderBuilder(
         sl_atr_multiple=config.sl_atr_multiple,

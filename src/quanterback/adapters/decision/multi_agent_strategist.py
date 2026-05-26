@@ -6,13 +6,28 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from quanterback.adapters.decision.prompted_strategist import _strip_markdown_fences
 from quanterback.domain.agents import AgentDebate, Thesis
 from quanterback.domain.decision import StrategyDecision
 from quanterback.domain.market import CondensedSummary
 from quanterback.interfaces.decision import ChatMessage, LLMClient
 
 log = logging.getLogger(__name__)
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Some chat models wrap JSON in ```json fences even when told not to.
+
+    Strip them so json.loads can succeed.
+    """
+    t = text.strip()
+    if t.startswith("```"):
+        # remove opening fence (with optional `json` language tag) and closing fence
+        first_nl = t.find("\n")
+        if first_nl != -1:
+            t = t[first_nl + 1:]
+        if t.endswith("```"):
+            t = t[:-3].rstrip()
+    return t
 
 
 class MultiAgentStrategist:
@@ -257,7 +272,7 @@ class MultiAgentStrategist:
             resp = self._llm_client.chat(messages, temperature=0.0)
             content = _strip_markdown_fences(resp.content)
             data_out = json.loads(content)
-            # Coerce missing fields like PromptedLLMStrategist does
+            # Coerce missing fields the LLM may omit (smaller models)
             if not data_out.get("ticker"):
                 data_out["ticker"] = summary.ticker
             if not data_out.get("strategy"):
