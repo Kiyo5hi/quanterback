@@ -26,9 +26,9 @@ def test_load_defaults_only(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(_minimal_secrets_toml())
     cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.position_size_pct == 0.05
-    assert cfg.max_total_exposure_pct == 0.30
-    assert cfg.max_sector_exposure_pct == 0.10
+    assert cfg.position_size_pct == 0.10
+    assert cfg.max_total_exposure_pct == 0.95
+    assert cfg.max_sector_exposure_pct == 0.30
     assert cfg.sl_atr_multiple == 1.5
     assert cfg.tp_atr_multiple == 3.0
     assert cfg.risk_thresholds.max_drawdown == 0.5
@@ -303,8 +303,8 @@ def test_exposure_caps_defaults(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(_minimal_secrets_toml())
     cfg = AppConfig.load(toml_paths=[toml])
-    assert cfg.max_total_exposure_pct == 0.30
-    assert cfg.max_sector_exposure_pct == 0.10
+    assert cfg.max_total_exposure_pct == 0.95
+    assert cfg.max_sector_exposure_pct == 0.30
 
 
 def test_load_universe_screener_config(tmp_path: Path) -> None:

@@ -21,11 +21,13 @@ top_n_neutral = 10
 top_n_bearish = 5
 
 [position]
-position_size_pct = 0.05
-# Total $ across all positions ≤ 30% of account
-max_total_exposure_pct = 0.30
-# Per-sector $ ≤ 10% of account
-max_sector_exposure_pct = 0.10
+# Per-position size = 10% of account ($10k @ $100k account).
+# Total cap 95% allows ~9 concurrent positions; leaves 5% cash for fees/slippage.
+position_size_pct = 0.10
+max_total_exposure_pct = 0.95
+# Per sector ≤ 30% — allows AI to concentrate when conviction is high
+# (e.g., 3 ai_semi positions if all pass gates).
+max_sector_exposure_pct = 0.30
 
 [risk.sl_tp]
 sl_atr_multiple = 1.5
