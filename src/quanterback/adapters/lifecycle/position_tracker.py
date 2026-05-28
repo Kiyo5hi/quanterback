@@ -47,16 +47,27 @@ class PositionTracker:
         now = datetime.now(tz=timezone.utc)
         after = now - timedelta(hours=self.lookback_hours)
 
-        # Reap zombie pendings (Alpaca never confirmed fill within 1h).
-        # Now we cancel Alpaca-side orders before marking closed.
-        cleaned = self._cleanup_stale_pendings_with_cancel(max_age_hours=1.0)
-        if cleaned:
-            log.info("Reaped %d stale pending positions (>1h, no fill)", cleaned)
-
         positions = self.broker.list_positions()
         orders = self.broker.list_orders_after(after)
 
         open_now = {p.ticker: p for p in positions}
+
+        # Promote pending -> bracket_active for any local pending position that
+        # Alpaca now confirms is held. MUST run before cleanup_stale_pendings,
+        # else a filled-but-still-pending position gets reaped (and its already-
+        # filled order "cancelled", a no-op) — local marks it closed while Alpaca
+        # keeps the shares, so the next scan re-buys it. That drift accumulated
+        # 7x duplicate buys -> 123% exposure on 2026-05-27.
+        promoted = self._promote_filled_pendings(open_now)
+        if promoted:
+            log.info("Promoted %d pending positions to bracket_active (fill confirmed)", promoted)
+
+        # Reap zombie pendings (Alpaca never confirmed fill within 1h).
+        # Pass open_now so we NEVER reap a ticker Alpaca actually holds.
+        cleaned = self._cleanup_stale_pendings_with_cancel(max_age_hours=1.0, alpaca_held=set(open_now))
+        if cleaned:
+            log.info("Reaped %d stale pending positions (>1h, no fill)", cleaned)
+
         prior_open = {p.ticker: p for p in self.store.get_open_positions()}
 
         opens_detected = self._detect_opens(open_now, prior_open, orders)
@@ -242,40 +253,75 @@ class PositionTracker:
         except Exception as e:
             log.warning("Failed to send close notification: %s", e)
 
-    def _cleanup_stale_pendings_with_cancel(self, max_age_hours: float = 1.0) -> int:
+    def _promote_filled_pendings(self, alpaca_open: dict) -> int:
+        """Promote local 'pending' positions to 'bracket_active' when Alpaca
+        confirms the fill (ticker appears in Alpaca's open positions).
+
+        Without this, a filled position lingers as 'pending' until the 1h
+        reaper closes it — while Alpaca keeps the shares — causing re-buys.
+        """
+        promoted = 0
+        for p in self.store.get_open_positions():
+            if p.state == "pending" and p.ticker in alpaca_open:
+                ap = alpaca_open[p.ticker]
+                rows = self.store.promote_pending_to_active(
+                    p.ticker,
+                    entry_price=float(ap.avg_entry_price),
+                    qty=float(ap.qty),
+                )
+                promoted += rows
+        return promoted
+
+    def _cleanup_stale_pendings_with_cancel(
+        self, max_age_hours: float = 1.0, alpaca_held: set | None = None
+    ) -> int:
         """Mark pending positions as closed AND cancel Alpaca orders.
 
         This is the safe version of cleanup_stale_pendings() that cancels
         Alpaca-side orders before marking local DB as closed.
 
+        NEVER reaps a ticker present in `alpaca_held` — those are real filled
+        positions (the caller should have promoted them already; this is a
+        belt-and-suspenders guard against the 2026-05-27 over-buy drift).
+
         Returns count of rows cleaned.
         """
         from datetime import timedelta
+        alpaca_held = alpaca_held or set()
         cutoff = (datetime.now(tz=timezone.utc)
                   - timedelta(hours=max_age_hours)).isoformat()
 
         # Fetch pending positions older than cutoff, with Alpaca order IDs
         # (positions.order_id is DB FK to orders(id), need orders.alpaca_order_id)
         pending = self.store._conn.execute(
-            "SELECT p.id, o.alpaca_order_id FROM positions p "
+            "SELECT p.id, p.ticker, o.alpaca_order_id FROM positions p "
             "LEFT JOIN orders o ON p.order_id = o.id "
             "WHERE p.state = 'pending' AND p.opened_at < ?",
             (cutoff,)
         ).fetchall()
 
-        cancelled_count = 0
+        reaped_ids = []
         for row in pending:
+            if row["ticker"] in alpaca_held:
+                # Alpaca holds this — it filled, do NOT cancel/reap. Promotion
+                # should have caught it; skip defensively.
+                log.warning(
+                    "Skipping reap of %s — Alpaca holds it (filled, not stale)",
+                    row["ticker"],
+                )
+                continue
             alpaca_order_id = row["alpaca_order_id"]
-            if alpaca_order_id and self.broker.cancel_order(str(alpaca_order_id)):
-                cancelled_count += 1
-            elif alpaca_order_id:
+            if alpaca_order_id and not self.broker.cancel_order(str(alpaca_order_id)):
                 log.warning("Failed to cancel stale order %s", alpaca_order_id)
+            reaped_ids.append(row["id"])
 
-        # Now mark them closed in DB
+        if not reaped_ids:
+            return 0
+
+        placeholders = ",".join("?" * len(reaped_ids))
         cur = self.store._conn.execute(
-            "UPDATE positions SET state='closed', closed_at=?, "
-            "exit_reason='pending_timeout' "
-            "WHERE state = 'pending' AND opened_at < ?",
-            (datetime.now(tz=timezone.utc).isoformat(), cutoff),
+            f"UPDATE positions SET state='closed', closed_at=?, "
+            f"exit_reason='pending_timeout' WHERE id IN ({placeholders})",
+            (datetime.now(tz=timezone.utc).isoformat(), *reaped_ids),
         )
         return int(cur.rowcount or 0)

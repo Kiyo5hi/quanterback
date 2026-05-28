@@ -207,6 +207,22 @@ class SqliteStore:
             )
             return int(p.id)
 
+    def promote_pending_to_active(
+        self, ticker: str, *, entry_price: float, qty: float
+    ) -> int:
+        """Promote a 'pending' position to 'bracket_active' once Alpaca confirms
+        the fill. Fills in the real entry_price + qty from the broker snapshot.
+
+        Returns rows updated (0 if no pending row for ticker).
+        """
+        cur = self._conn.execute(
+            "UPDATE positions SET state='bracket_active', entry_price=?, qty=? "
+            "WHERE ticker=? AND state='pending'",
+            (entry_price, qty, ticker.upper()),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def has_open_lifecycle(self, ticker: str) -> bool:
         """True if any non-closed position exists for ticker."""
         return self.get_open(ticker) is not None

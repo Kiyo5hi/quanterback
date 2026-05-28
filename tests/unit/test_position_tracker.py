@@ -130,6 +130,53 @@ def test_detects_new_open(store: SqliteStore, i18n_en: I18n) -> None:
     assert notifier.events[0].kind == "position.opened"
 
 
+def test_promotes_pending_to_active_on_fill(store: SqliteStore, i18n_en: I18n) -> None:
+    """Regression (2026-05-27 over-buy drift): a 'pending' position that Alpaca
+    has filled must be promoted to bracket_active, NOT reaped as stale even when
+    older than the 1h cleanup window."""
+    order_id = _create_order_in_store(store, "AAPL")
+    # opened 2h ago — past the 1h stale-reap cutoff
+    opened = datetime.now(tz=timezone.utc) - timedelta(hours=2)
+    store.upsert_position(PersistedPosition(
+        ticker="AAPL", order_id=order_id, qty=16, entry_price=None, opened_at=opened,
+        state="pending", sl=290.0, tp=350.0,
+    ))
+
+    broker = FakeBroker()
+    # Alpaca confirms the fill
+    broker.positions = [FakePos(ticker="AAPL", qty=16, avg_entry_price=310.0)]
+    notifier = FakeNotifier()
+    tracker = PositionTracker(broker=broker, store=store, notifier=notifier, i18n=i18n_en)
+    tracker.tick()
+
+    # Must be promoted, NOT closed as pending_timeout
+    open_positions = store.get_open_positions()
+    aapl = next((p for p in open_positions if p.ticker == "AAPL"), None)
+    assert aapl is not None, "AAPL was reaped instead of promoted"
+    assert aapl.state == "bracket_active"
+    assert aapl.entry_price == 310.0
+    assert aapl.qty == 16
+    # And it must NOT have been cancelled on Alpaca
+    assert "o1" not in broker.cancelled
+
+
+def test_does_not_reap_pending_alpaca_holds(store: SqliteStore, i18n_en: I18n) -> None:
+    """Belt-and-suspenders: even a stale pending must not be reaped/cancelled
+    if Alpaca actually holds the ticker."""
+    order_id = _create_order_in_store(store, "TSLA")
+    opened = datetime.now(tz=timezone.utc) - timedelta(hours=3)
+    store.upsert_position(PersistedPosition(
+        ticker="TSLA", order_id=order_id, qty=8, entry_price=None, opened_at=opened,
+        state="pending", sl=400.0, tp=480.0,
+    ))
+    broker = FakeBroker()
+    broker.positions = [FakePos(ticker="TSLA", qty=8, avg_entry_price=430.0)]
+    tracker = PositionTracker(broker=broker, store=store, notifier=FakeNotifier(), i18n=i18n_en)
+    result = tracker.tick()
+    assert result["pendings_reaped"] == 0
+    assert broker.cancelled == []
+
+
 def test_detects_close_with_stop_loss(store: SqliteStore, i18n_en: I18n) -> None:
     """Test detection of position close via stop loss."""
     # Seed prior open position
