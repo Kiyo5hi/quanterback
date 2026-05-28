@@ -164,43 +164,35 @@ class AlpacaPaperBroker:
     def list_all_orders(
         self, status: str | None = None, after: datetime | None = None
     ) -> list[dict]:
-        """Get all orders matching status and optional timestamp filter.
+        """Get all orders with their fine-grained status.
 
-        Returns dicts with at least 'id' and 'status' keys.
+        Alpaca's QueryOrderStatus only supports OPEN / CLOSED / ALL — the
+        fine-grained states (rejected/expired/canceled/filled/...) live on each
+        order's own `.status` field. Previously this method referenced
+        QueryOrderStatus.PENDING_NEW etc. which don't exist → AttributeError →
+        always returned [] (silently broke reconciler order-level checks).
+
+        Returns dicts with id, status, symbol, side keys.
         """
         try:
-            orders_to_check = []
-            # Statuses to check: open, pending, rejected, expired, canceled
-            statuses_to_query = [
-                QueryOrderStatus.OPEN,
-                QueryOrderStatus.PENDING_NEW,
-                QueryOrderStatus.ACCEPTED,
-                QueryOrderStatus.REJECTED,
-                QueryOrderStatus.EXPIRED,
-                QueryOrderStatus.CANCELED,
-            ]
-            # If specific status requested, filter to just that one
-            if status:
-                status_enum = getattr(QueryOrderStatus, status.upper(), None)
-                if status_enum:
-                    statuses_to_query = [status_enum]
-                else:
-                    statuses_to_query = []
-
-            for status_enum in statuses_to_query:
-                try:
-                    req = GetOrdersRequest(status=status_enum, limit=200)
-                    if after:
-                        req.after = after
-                    resp = self._client.get_orders(filter=req)
-                    for o in resp:
-                        orders_to_check.append({
-                            "id": str(o.id),
-                            "status": str(o.status) if o.status else "unknown",
-                        })
-                except Exception:
-                    pass
-            return orders_to_check
+            req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+            if after:
+                req.after = after
+            resp = self._client.get_orders(filter=req)
+            out = []
+            for o in resp:
+                st = str(o.status).split(".")[-1].lower() if o.status else "unknown"
+                # Optional client-side filter by fine-grained status
+                if status and st != status.lower():
+                    continue
+                side = str(o.side).split(".")[-1].lower() if o.side else "unknown"
+                out.append({
+                    "id": str(o.id),
+                    "status": st,
+                    "symbol": str(o.symbol) if o.symbol else "",
+                    "side": side,
+                })
+            return out
         except Exception as e:
             log.warning("Failed to list all Alpaca orders: %s", e)
             return []
