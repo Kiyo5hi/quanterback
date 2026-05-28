@@ -25,7 +25,10 @@ class SqliteSystemStateService:
                 updated_by="bootstrap", reason=None,
             )
         return SystemState(
-            mode=row["mode"], reason=row["reason"], updated_by=row["actor"],
+            mode=row["mode"], reason=row["reason"],
+            # actor column is nullable; SystemState.updated_by requires str.
+            # Coerce NULL -> "system" so a missing actor never crashes /status.
+            updated_by=row["actor"] or "system",
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 

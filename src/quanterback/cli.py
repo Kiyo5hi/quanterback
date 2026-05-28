@@ -604,13 +604,26 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                 last_change=i18n.format_dt(state.updated_at, "%Y-%m-%d %H:%M %Z"),
             ))
 
+    def _safe_dispatch(cmd):
+        # Runs in a worker thread. An uncaught exception here would be captured
+        # by the Future and silently swallowed (no log, no reply) — that masked
+        # a /status crash on 2026-05-28. Always log AND tell the user.
+        try:
+            _dispatch(cmd)
+        except Exception as e:
+            log.exception("Command /%s crashed: %s", cmd.command, e)
+            try:
+                reply(cmd, f"⚠️ /{cmd.command} failed: {str(e)[:300]}")
+            except Exception:
+                log.exception("Also failed to send error reply for /%s", cmd.command)
+
     # Spawn each command in its own daemon thread so slow handlers
     # (/scan up to 120s, /rescan up to 600s) don't block the poll loop.
     # SqliteStore uses check_same_thread=False, subprocess releases GIL,
     # Jinja/I18n are read-only — safe to share across threads.
     for cmd in channel.listen():
         try:
-            _executor.submit(_dispatch, cmd)
+            _executor.submit(_safe_dispatch, cmd)
         except RuntimeError as e:
             log.exception("Executor rejected command %s: %s", cmd.command, e)
         except Exception as e:
