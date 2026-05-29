@@ -153,6 +153,22 @@ def test_upsert_position_inserts_when_new(store: SqliteStore) -> None:
     assert pid >= 1
 
 
+def test_update_position_qty_after_trim(store: SqliteStore) -> None:
+    """Bug 2 regression: after a partial trim the local qty must be reduced so
+    the next scan trims against the real remaining size (not the stale qty),
+    preventing repeated trims + re-buy churn."""
+    oid = _seeded_order(store)
+    store.upsert_position(PersistedPosition(
+        ticker="AMD", order_id=oid, state="bracket_active", qty=54,
+        entry_price=490.0, opened_at=_now(),
+    ))
+    rows = store.update_position_qty("AMD", 27)
+    assert rows == 1
+    pos = next(p for p in store.get_open_positions() if p.ticker == "AMD")
+    assert pos.qty == 27
+    assert pos.state == "bracket_active"
+
+
 def test_second_pending_supersedes_first(store: SqliteStore) -> None:
     """Submitting a second order for same ticker auto-supersedes stale pending.
 

@@ -680,10 +680,15 @@ class ScanPipeline:
                         keep_pct = max(0.0, min(1.0, keep_pct))
                         sell_qty = int(pos.qty * (1 - keep_pct))
                         if sell_qty > 0:
-                            success = self.executor.trim_position(ticker, sell_qty)
+                            success = self.executor.trim_position(ticker, sell_qty, sl_price=pos.sl)
                             if success:
-                                log.info("[%s] Trimmed %d shares (keep %.0f%%)",
-                                         ticker, sell_qty, keep_pct * 100)
+                                # Update local qty so the NEXT scan trims against
+                                # the real remaining size (not the stale pre-trim
+                                # qty), preventing repeated trims + re-buy churn.
+                                new_qty = pos.qty - sell_qty
+                                self.state_store.update_position_qty(ticker, new_qty)
+                                log.info("[%s] Trimmed %d shares (keep %.0f%%, remaining %d)",
+                                         ticker, sell_qty, keep_pct * 100, new_qty)
                                 applied = True
                             else:
                                 log.warning("[%s] Failed to trim position", ticker)

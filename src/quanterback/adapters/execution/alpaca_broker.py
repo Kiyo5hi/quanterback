@@ -14,9 +14,16 @@ from alpaca.trading.requests import (
     LimitOrderRequest,
     MarketOrderRequest,
     StopLossRequest,
+    StopOrderRequest,
     TakeProfitRequest,
     TrailingStopOrderRequest,
 )
+
+# Alpaca order statuses that still hold shares (block a new SELL).
+_NONTERMINAL_STATUSES = frozenset({
+    "new", "accepted", "held", "partially_filled",
+    "pending_new", "accepted_for_bidding", "pending_replace", "pending_cancel",
+})
 
 from quanterback.domain.order import BracketOrderSpec, ExecutionResult
 from quanterback.interfaces.lifecycle import OrderSnapshot, PositionSnapshot
@@ -207,8 +214,43 @@ class AlpacaPaperBroker:
             log.warning("Failed to cancel order %s: %s", order_id, e)
             return False
 
+    def _cancel_exit_legs(self, ticker: str) -> float:
+        """Cancel ALL non-terminal SELL orders for a ticker (bracket SL + TP legs)
+        so the held shares are freed for a new SELL.
+
+        Queries status=ALL because Alpaca's status=OPEN filter does NOT reliably
+        return ACCEPTED-state stop legs (observed 2026-05-28: SL stops sat in
+        'accepted' and were invisible to the OPEN query, so they were never
+        cancelled and held the shares -> EXIT_NOW/trim got 'insufficient qty').
+
+        Returns total qty freed.
+        """
+        freed = 0.0
+        try:
+            req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+            for o in self._client.get_orders(filter=req):
+                if str(o.symbol) != ticker:
+                    continue
+                side = str(o.side).split(".")[-1].lower()
+                status = str(o.status).split(".")[-1].lower()
+                if side != "sell" or status not in _NONTERMINAL_STATUSES:
+                    continue
+                try:
+                    self._client.cancel_order_by_id(str(o.id))
+                    freed += float(o.qty or 0)
+                    log.info("Cancelled exit leg %s (%s qty=%s) for %s",
+                             str(o.id)[:8], status, o.qty, ticker)
+                except Exception as e:
+                    log.warning("Failed to cancel exit leg %s: %s", o.id, e)
+        except Exception as e:
+            log.warning("Failed to list orders while cancelling exit legs for %s: %s",
+                        ticker, e)
+        return freed
+
     def market_close(self, ticker: str, qty: float | None = None) -> bool:
-        """Close a position with a market sell order. If qty is None, close entire position."""
+        """Close a position with a market sell. Cancels the bracket SL/TP legs
+        first (they hold the shares), then submits the SELL.
+        """
         try:
             positions = self.list_positions()
             pos = next((p for p in positions if p.ticker == ticker), None)
@@ -216,12 +258,17 @@ class AlpacaPaperBroker:
                 log.warning("No open position for %s", ticker)
                 return False
             close_qty = qty if qty is not None else pos.qty
+
+            # Free the shares: cancel exit legs holding them, then settle.
+            self._cancel_exit_legs(ticker)
+            time.sleep(1.5)
+
             req = MarketOrderRequest(
                 symbol=ticker, qty=close_qty, side=OrderSide.SELL,
                 time_in_force=TimeInForce.GTC,
             )
             order = self._client.submit_order(req)
-            log.info("Market close for %s: %d shares, order_id=%s", ticker, close_qty, order.id)
+            log.info("Market close for %s: %s shares, order_id=%s", ticker, close_qty, order.id)
             return True
         except Exception as e:
             log.error("Failed to market close %s: %s", ticker, e)
@@ -278,12 +325,15 @@ class AlpacaPaperBroker:
             log.error("Failed to replace_stop_loss for %s: %s", ticker, e)
             return False
 
-    def trim_position(self, ticker: str, qty_to_sell: int) -> bool:
+    def trim_position(
+        self, ticker: str, qty_to_sell: int, sl_price: float | None = None
+    ) -> bool:
         """Partially close a position by qty.
 
-        Cancels bracket exit legs proportionally to free up enough shares,
-        then market-sells qty_to_sell. Remaining shares keep their bracket exit
-        leg (re-attached by a subsequent run if needed).
+        Cancels ALL bracket exit legs (to free shares), market-sells
+        qty_to_sell, then RE-ESTABLISHES a stop-loss on the remaining shares
+        at sl_price (if given). Without the re-attach the remainder would sit
+        unprotected, which is what happened on 2026-05-28.
 
         Returns True if the market-sell was submitted, False otherwise.
         """
@@ -292,28 +342,15 @@ class AlpacaPaperBroker:
                         qty_to_sell, ticker)
             return False
         try:
-            # Find open SELL orders for this ticker (the bracket TP/SL legs)
-            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=200)
-            all_open = self._client.get_orders(filter=req)
-            sell_orders = [
-                o for o in all_open
-                if str(o.symbol) == ticker
-                and str(o.side).split(".")[-1].upper() == "SELL"
-            ]
+            # Snapshot current qty so we know the remainder after the sell.
+            pos = next((p for p in self.list_positions() if p.ticker == ticker), None)
+            if pos is None:
+                log.warning("trim_position: no Alpaca position for %s", ticker)
+                return False
+            remaining = int(pos.qty) - qty_to_sell
 
-            # Free up at least qty_to_sell shares by cancelling exit legs.
-            freed = 0.0
-            for o in sell_orders:
-                if freed >= qty_to_sell:
-                    break
-                try:
-                    self._client.cancel_order_by_id(str(o.id))
-                    freed += float(o.qty or 0)
-                    log.info("Cancelled exit leg %s for trim (qty=%s)", o.id, o.qty)
-                except Exception as e:
-                    log.warning("Failed to cancel exit leg %s: %s", o.id, e)
-
-            # Brief settle delay so the broker frees the shares before SELL submit.
+            # Free shares: cancel ALL exit legs (status=ALL catches accepted stops).
+            self._cancel_exit_legs(ticker)
             time.sleep(1.5)
 
             order_req = MarketOrderRequest(
@@ -321,8 +358,22 @@ class AlpacaPaperBroker:
                 side=OrderSide.SELL, time_in_force=TimeInForce.DAY,
             )
             order = self._client.submit_order(order_req)
-            log.info("Trim order %s submitted: %s %s shares",
-                     order.id, ticker, qty_to_sell)
+            log.info("Trim order %s submitted: %s %s shares (remaining %s)",
+                     order.id, ticker, qty_to_sell, remaining)
+
+            # Re-attach a protective stop on the remainder.
+            if remaining > 0 and sl_price is not None:
+                time.sleep(1.5)
+                try:
+                    sl_req = StopOrderRequest(
+                        symbol=ticker, qty=remaining, side=OrderSide.SELL,
+                        time_in_force=TimeInForce.GTC, stop_price=round(sl_price, 2),
+                    )
+                    sl_order = self._client.submit_order(sl_req)
+                    log.info("Re-attached SL for %s: %s shares @ $%.2f, order %s",
+                             ticker, remaining, sl_price, str(sl_order.id)[:8])
+                except Exception as e:
+                    log.warning("Failed to re-attach SL on %s remainder: %s", ticker, e)
             return True
         except Exception as e:
             log.exception("Failed to trim position %s: %s", ticker, e)

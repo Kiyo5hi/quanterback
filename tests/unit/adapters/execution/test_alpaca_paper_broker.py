@@ -110,6 +110,10 @@ def fake_trading_client_with_orders(monkeypatch: pytest.MonkeyPatch) -> dict:
         "open_orders": [],
         "cancelled": [],
         "submitted_orders": [],
+        "positions": [
+            SimpleNamespace(symbol="AMD", qty="10", avg_entry_price="490",
+                            current_price="495", market_value="4950"),
+        ],
     }
 
     class FakeClient:
@@ -118,6 +122,9 @@ def fake_trading_client_with_orders(monkeypatch: pytest.MonkeyPatch) -> dict:
 
         def get_orders(self, filter=None):
             return list(state["open_orders"])
+
+        def get_all_positions(self):
+            return list(state["positions"])
 
         def cancel_order_by_id(self, order_id: str):
             state["cancelled"].append(order_id)
@@ -147,6 +154,7 @@ def fake_trading_client_with_orders(monkeypatch: pytest.MonkeyPatch) -> dict:
 def _make_sell_order(order_id: str, ticker: str, qty: float) -> SimpleNamespace:
     return SimpleNamespace(
         id=order_id, symbol=ticker, side="OrderSide.SELL", qty=qty,
+        status="accepted",
     )
 
 
@@ -214,3 +222,45 @@ def test_trim_position_only_cancels_legs_for_target_ticker(
 
     assert "amd-leg" in fake_trading_client_with_orders["cancelled"]
     assert "nvda-leg" not in fake_trading_client_with_orders["cancelled"]
+
+
+def test_trim_cancels_accepted_stop_leg(fake_trading_client_with_orders: dict) -> None:
+    """Bug 1 regression: an ACCEPTED-state SELL STOP leg must be cancelled too.
+    The old code queried status=OPEN which missed accepted stops -> shares stayed
+    held -> SELL rejected. _cancel_exit_legs uses status=ALL + non-terminal filter."""
+    stop = _make_sell_order("amd-sl", "AMD", 10)
+    stop.status = "accepted"  # not 'new' — the state the old OPEN query missed
+    fake_trading_client_with_orders["open_orders"] = [stop]
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
+    assert ex.trim_position("AMD", qty_to_sell=5) is True
+    assert "amd-sl" in fake_trading_client_with_orders["cancelled"]
+
+
+def test_trim_reattaches_sl_on_remainder(fake_trading_client_with_orders: dict) -> None:
+    """Bug 3 regression: after trimming, the kept shares get a fresh stop."""
+    fake_trading_client_with_orders["open_orders"] = [_make_sell_order("tp", "AMD", 10)]
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
+    ex.trim_position("AMD", qty_to_sell=4, sl_price=450.0)
+    # Two submits: the market SELL (qty 4) and the re-attached STOP (qty 6).
+    submitted = fake_trading_client_with_orders["submitted_orders"]
+    assert len(submitted) == 2
+    sells = [o for o in submitted if getattr(o, "qty", None) == 4]
+    stops = [o for o in submitted if getattr(o, "stop_price", None) == 450.0]
+    assert len(sells) == 1
+    assert len(stops) == 1
+    assert stops[0].qty == 6  # remainder 10 - 4
+
+
+def test_market_close_cancels_legs_before_selling(
+    fake_trading_client_with_orders: dict,
+) -> None:
+    """Bug 1 regression: market_close must cancel the bracket legs holding the
+    shares, then submit the SELL (else 'insufficient qty available')."""
+    fake_trading_client_with_orders["open_orders"] = [_make_sell_order("amd-sl", "AMD", 10)]
+    ex = AlpacaPaperBroker(api_key="k", secret="s")
+    assert ex.market_close("AMD") is True
+    assert "amd-sl" in fake_trading_client_with_orders["cancelled"]
+    # market SELL submitted for the full 10 shares
+    sells = [o for o in fake_trading_client_with_orders["submitted_orders"]
+             if getattr(o, "qty", None) == 10.0 or getattr(o, "qty", None) == 10]
+    assert len(sells) == 1

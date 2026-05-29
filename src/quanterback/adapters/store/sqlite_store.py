@@ -207,6 +207,20 @@ class SqliteStore:
             )
             return int(p.id)
 
+    def update_position_qty(self, ticker: str, new_qty: float) -> int:
+        """Set the qty of a ticker's open position (after a partial trim).
+
+        Without this the local row keeps the pre-trim qty, so the next scan
+        re-trims against a stale qty and eventually churns/re-buys.
+        Returns rows updated.
+        """
+        cur = self._conn.execute(
+            "UPDATE positions SET qty=? WHERE ticker=? AND state != 'closed'",
+            (new_qty, ticker.upper()),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def promote_pending_to_active(
         self, ticker: str, *, entry_price: float, qty: float
     ) -> int:

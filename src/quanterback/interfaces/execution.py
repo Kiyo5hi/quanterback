@@ -27,9 +27,12 @@ class Executor(Protocol):
         """Replace a bracket's stop_loss leg with a new stop price. Returns True if successful."""
         ...
 
-    def trim_position(self, ticker: str, qty_to_sell: int) -> bool:
-        """Partially close a position by qty. Cancels bracket exit legs proportionally,
-        then market-sells qty_to_sell shares. Returns True if the trim was submitted."""
+    def trim_position(
+        self, ticker: str, qty_to_sell: int, sl_price: float | None = None
+    ) -> bool:
+        """Partially close a position by qty. Cancels all bracket exit legs,
+        market-sells qty_to_sell, then re-attaches a stop at sl_price on the
+        remainder. Returns True if the trim was submitted."""
         ...
 
     def is_market_open(self) -> bool:
