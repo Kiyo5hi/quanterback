@@ -30,12 +30,11 @@ max_total_exposure_pct = 0.95
 max_sector_exposure_pct = 0.30
 
 [position_management]
-# When true, runs PositionManagementAgent at end of each scan to re-evaluate
-# held positions (HOLD / TIGHTEN_SL / TRIM_HALF / EXIT_NOW).
-# TEMPORARILY DISABLED 2026-05-29: apply path had 3 bugs (EXIT_NOW failed on
-# bracketed shares, TRIM_HALF didn't update local qty -> churn, trim left
-# remainder unprotected). Re-enable after fixes verified against live Alpaca.
-enabled = false
+# Runs PositionManagementAgent at end of each scan to re-evaluate held
+# positions (HOLD / TIGHTEN_SL / TRIM_HALF / EXIT_NOW). Was disabled 2026-05-29
+# while 3 apply-path bugs were fixed (commit 57536db); re-enabled 2026-06-01
+# after live verification of the leg-detection fix.
+enabled = true
 min_age_hours = 6.0
 
 [risk.sl_tp]
