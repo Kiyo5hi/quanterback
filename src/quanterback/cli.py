@@ -258,12 +258,115 @@ def cmd_rescan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_status_context(broker, store, sys_state, config, i18n) -> dict:
+    """Gather everything /status displays: live Alpaca positions, SL coverage,
+    exposure vs cap, local-DB drift check, system state.
+
+    Reads broker (Alpaca) as source of truth for positions; SqliteStore only
+    for drift detection vs local DB.
+    """
+    from collections import defaultdict
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+    from quanterback.adapters.execution.alpaca_broker import _NONTERMINAL_STATUSES
+
+    state = sys_state.get_current()
+    mode_emoji = {"normal": "🟢", "frozen": "❄️", "halted": "🛑"}.get(state.mode, "❔")
+
+    # Live Alpaca state
+    account_value: float | None = None
+    positions: list = []
+    try:
+        account_value = float(broker.get_account_value())
+    except Exception as e:
+        log.warning("get_account_value failed in /status: %s", e)
+    try:
+        positions = list(broker.list_positions())
+    except Exception as e:
+        log.warning("list_positions failed in /status: %s", e)
+
+    # SL coverage per ticker (from open SELL stop orders)
+    sl_qty: dict[str, float] = defaultdict(float)
+    try:
+        for o in broker._client.get_orders(  # type: ignore[attr-defined]
+            filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500)
+        ):
+            side = str(o.side).split(".")[-1].lower()
+            status = str(o.status).split(".")[-1].lower()
+            order_type = str(o.order_type).split(".")[-1].lower()
+            if (
+                side == "sell"
+                and status in _NONTERMINAL_STATUSES
+                and "stop" in order_type
+            ):
+                sl_qty[str(o.symbol)] += float(o.qty or 0)
+    except Exception as e:
+        log.warning("list orders for SL coverage failed: %s", e)
+
+    # Build per-position rows + total exposure
+    rows = []
+    total_exposure = 0.0
+    for p in sorted(positions, key=lambda x: -(x.qty * x.avg_entry_price)):
+        cur_price = float(getattr(p, "current_price", 0) or p.avg_entry_price)
+        exposure = float(p.qty) * float(p.avg_entry_price)
+        total_exposure += exposure
+        pnl_usd = (cur_price - float(p.avg_entry_price)) * float(p.qty)
+        pnl_pct = (cur_price / float(p.avg_entry_price) - 1.0) * 100.0 if p.avg_entry_price else 0.0
+        sl_covered_qty = sl_qty.get(p.ticker, 0.0)
+        sl_pct = (sl_covered_qty / float(p.qty) * 100.0) if p.qty else 0.0
+        rows.append({
+            "ticker": p.ticker,
+            "qty": int(p.qty) if float(p.qty).is_integer() else float(p.qty),
+            "entry": float(p.avg_entry_price),
+            "current": cur_price,
+            "exposure": exposure,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "sl_pct": sl_pct,
+            "sl_ok": sl_pct >= 99.0,
+        })
+
+    cap = config.max_total_exposure_pct * account_value if account_value else 0.0
+    headroom = max(0.0, cap - total_exposure)
+    exposure_pct = (total_exposure / account_value * 100.0) if account_value else 0.0
+
+    # Drift check vs local DB
+    local_tickers = {p.ticker for p in store.get_open_positions()}
+    alpaca_tickers = {p.ticker for p in positions}
+    only_local = sorted(local_tickers - alpaca_tickers)
+    only_alpaca = sorted(alpaca_tickers - local_tickers)
+    drift_warn = bool(only_local or only_alpaca)
+
+    naked_tickers = [r["ticker"] for r in rows if not r["sl_ok"]]
+
+    return {
+        "mode": state.mode,
+        "mode_emoji": mode_emoji,
+        "last_change": i18n.format_dt(state.updated_at, "%Y-%m-%d %H:%M %Z"),
+        "now": i18n.format_dt(datetime.now(tz=timezone.utc), "%Y-%m-%d %H:%M %Z"),
+        "account_value": account_value or 0.0,
+        "pending": len(store.query_pending_user_triggers()),
+        "positions": rows,
+        "n_positions": len(rows),
+        "total_exposure": total_exposure,
+        "cap": cap,
+        "headroom": headroom,
+        "exposure_pct": exposure_pct,
+        "drift_warn": drift_warn,
+        "drift_only_local": only_local,
+        "drift_only_alpaca": only_alpaca,
+        "naked_tickers": naked_tickers,
+    }
+
+
 def cmd_control_bot(_args: argparse.Namespace) -> int:
     _setup_logging()
     config = _load_config()
     i18n = I18n(language=config.language, templates_dir=config.templates_dir, display_timezone=config.display_timezone)
     _, sys_state, token = wire(config)
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
+    # Broker for /status — read live Alpaca state rather than the (drift-prone) local DB.
+    broker = AlpacaPaperBroker(api_key=config.alpaca_key, secret=config.alpaca_secret)
 
     from quanterback.adapters.control.telegram_commands import register_commands
     register_commands(token)  # best-effort
@@ -591,18 +694,10 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                         "control_watchlist_not_found", ticker=ticker
                     ))
         elif command == "status":
-            state = sys_state.get_current()
-            pending = len(store.query_pending_user_triggers())
-            open_lc = len(store.query_open_lifecycles())
-            mode_emoji = {"normal": "🟢", "frozen": "❄️", "halted": "🛑"}.get(
-                state.mode, "❔",
+            ctx = _build_status_context(
+                broker, store, sys_state, config, i18n,
             )
-            reply(cmd, i18n.render(
-                "control_status_reply",
-                mode=state.mode, mode_emoji=mode_emoji,
-                pending=pending, open_positions=open_lc,
-                last_change=i18n.format_dt(state.updated_at, "%Y-%m-%d %H:%M %Z"),
-            ))
+            reply(cmd, i18n.render("control_status_reply", **ctx))
 
     def _safe_dispatch(cmd):
         # Runs in a worker thread. An uncaught exception here would be captured

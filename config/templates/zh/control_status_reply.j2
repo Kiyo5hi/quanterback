@@ -1,5 +1,20 @@
-*QuanterBack 状态*
-模式: {{ mode_emoji }} `{{ mode }}`
-待处理触发器: *{{ pending }}*
-持仓数: *{{ open_positions }}*
-_最近状态变更: {{ last_change }}_
+*QuanterBack 状态* — {{ now }}
+模式: {{ mode_emoji }} `{{ mode }}` · 账户 ${{ '%.0f' | format(account_value) }}
+
+📊 *暴露*: ${{ '%.0f' | format(total_exposure) }} / ${{ '%.0f' | format(cap) }} ({{ '%.0f' | format(exposure_pct) }}%) · headroom ${{ '%.0f' | format(headroom) }}
+
+💼 *持仓* ({{ n_positions }})
+{% if positions %}```
+{% for p in positions -%}
+{{ '%-5s' | format(p.ticker) }} {{ '%4d' | format(p.qty) if p.qty is integer else '%4.1f' | format(p.qty) }} ${{ '%6.2f' | format(p.entry) }}→${{ '%6.2f' | format(p.current) }}  {% if p.pnl_usd >= 0 %}+{% endif %}${{ '%5.0f' | format(p.pnl_usd) }} ({{ '%+.1f' | format(p.pnl_pct) }}%) SL {{ '%3.0f' | format(p.sl_pct) }}%
+{% endfor -%}
+```{% endif %}
+{% if naked_tickers %}
+⚠️ *SL 未覆盖*: {{ naked_tickers | join(', ') }}
+{% endif %}
+{% if drift_warn %}
+⚠️ *本地 DB ↔ Alpaca 漂移*:
+{% if drift_only_local %}  仅本地: {{ drift_only_local | join(', ') }}
+{% endif %}{% if drift_only_alpaca %}  仅 Alpaca: {{ drift_only_alpaca | join(', ') }}
+{% endif %}{% endif %}
+待处理触发器: {{ pending }} · _上次状态变更: {{ last_change }}_

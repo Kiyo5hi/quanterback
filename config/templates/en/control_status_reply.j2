@@ -1,5 +1,20 @@
-*QuanterBack status*
-Mode: {{ mode_emoji }} `{{ mode }}`
-Pending user triggers: *{{ pending }}*
-Open positions: *{{ open_positions }}*
-_Last state change: {{ last_change }}_
+*QuanterBack status* — {{ now }}
+Mode: {{ mode_emoji }} `{{ mode }}` · Account ${{ '%.0f' | format(account_value) }}
+
+📊 *Exposure*: ${{ '%.0f' | format(total_exposure) }} / ${{ '%.0f' | format(cap) }} ({{ '%.0f' | format(exposure_pct) }}%) · headroom ${{ '%.0f' | format(headroom) }}
+
+💼 *Positions* ({{ n_positions }})
+{% if positions %}```
+{% for p in positions -%}
+{{ '%-5s' | format(p.ticker) }} {{ '%4d' | format(p.qty) if p.qty is integer else '%4.1f' | format(p.qty) }} ${{ '%6.2f' | format(p.entry) }}→${{ '%6.2f' | format(p.current) }}  {% if p.pnl_usd >= 0 %}+{% endif %}${{ '%5.0f' | format(p.pnl_usd) }} ({{ '%+.1f' | format(p.pnl_pct) }}%) SL {{ '%3.0f' | format(p.sl_pct) }}%
+{% endfor -%}
+```{% endif %}
+{% if naked_tickers %}
+⚠️ *Naked (no SL)*: {{ naked_tickers | join(', ') }}
+{% endif %}
+{% if drift_warn %}
+⚠️ *Local DB ↔ Alpaca drift*:
+{% if drift_only_local %}  Only local: {{ drift_only_local | join(', ') }}
+{% endif %}{% if drift_only_alpaca %}  Only Alpaca: {{ drift_only_alpaca | join(', ') }}
+{% endif %}{% endif %}
+Pending triggers: {{ pending }} · _Last state change: {{ last_change }}_
