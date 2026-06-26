@@ -102,6 +102,18 @@ chat_ids = []
 retry_window_hours = 1
 # bot_token = ""    # set in local.toml or TELEGRAM_BOT_TOKEN env
 
+[capabilities]
+# Deployment-level capability selection for future chat/agent surfaces.
+# Capabilities expand to concrete tools; tools.include/exclude can override
+# individual low-level tools.
+enabled = [
+  "research.analyze_ticker",
+]
+
+[tools]
+include = []
+exclude = []
+
 [storage]
 db_path = "/data/quanterback.sqlite"
 
