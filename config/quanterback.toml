@@ -99,8 +99,10 @@ cache_ttl_hours = 4
 
 [telegram]
 chat_ids = []
+research_chat_ids = []
 retry_window_hours = 1
 # bot_token = ""    # set in local.toml or TELEGRAM_BOT_TOKEN env
+# research_bot_token = ""  # optional separate token for `quanterback chat-bot`
 
 [capabilities]
 # Deployment-level capability selection for future chat/agent surfaces.
@@ -116,6 +118,9 @@ exclude = []
 
 [storage]
 db_path = "/data/quanterback.sqlite"
+# Optional separate DB for public research/chat state. Falls back to db_path
+# if omitted; use a separate DB for public deployments.
+research_db_path = "/data/quanterchat.sqlite"
 
 [i18n]
 # Global language for all user-facing text (TG bot replies, aggregated

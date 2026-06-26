@@ -22,6 +22,17 @@ services:
       - ./config:/config:ro
     restart: unless-stopped
 
+  chat-bot:
+    image: quanterback:dev
+    command: quanterback chat-bot
+    profiles: ["research"]
+    depends_on:
+      - scan
+    volumes:
+      - ./data:/data
+      - ./config:/config:ro
+    restart: unless-stopped
+
   position-tracker:
     image: quanterback:dev
     command: supercronic /app/docker/cron/position-tracker.cron

@@ -155,6 +155,15 @@ def _load_config() -> AppConfig:
     return AppConfig.load(toml_paths=toml_paths)
 
 
+def _load_research_chat_config():
+    from quanterback.chat.config import ResearchChatConfig
+    toml_paths = [
+        Path("/config/quanterback.toml"),
+        Path("/config/quanterback.local.toml"),
+    ]
+    return ResearchChatConfig.load(toml_paths=toml_paths)
+
+
 def _setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -747,6 +756,71 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_chat_bot(_args: argparse.Namespace) -> int:
+    _setup_logging()
+    from quanterback.capabilities.research import ResearchAnalyzer
+    from quanterback.chat.service import ResearchChatService
+    from quanterback.chat.telegram import TelegramResearchBot
+    from quanterback.tools.capabilities import build_research_catalog
+    from quanterback.tools.registry import ToolContext
+
+    config = _load_research_chat_config()
+    store = SqliteStore(config.db_path)
+    data_provider = YFinanceProvider(
+        cache_dir=config.cache_dir, cache_ttl_hours=config.cache_ttl_hours,
+    )
+    summarizer = RuleBasedSummarizer()
+    if config.llm_provider == "ark":
+        assert config.ark_api_key is not None
+        base_llm: LLMClient = ArkClient(
+            api_key=config.ark_api_key,
+            model=config.llm_model,
+            thinking_effort=config.llm_thinking_effort,
+        )
+    else:
+        base_llm = ClaudeClient(
+            api_key=config.anthropic_key,
+            model=config.llm_model,
+            thinking_effort=config.llm_thinking_effort,
+        )
+    strategist = MultiAgentStrategist(
+        base_llm,
+        prompts_dir=config.prompts_dir,
+        language=config.language,
+        parallel=config.agent_parallel,
+    )
+    analyzer = ResearchAnalyzer(
+        data_provider=data_provider,
+        summarizer=summarizer,
+        strategist=strategist,
+        news_provider=data_provider,
+        fundamentals_provider=data_provider,
+    )
+    catalog = build_research_catalog(analyzer=analyzer, store=store)
+    unknown = catalog.unknown_tool_names(config.capabilities)
+    if unknown:
+        raise ValueError(f"Configured capabilities reference unknown tools: {', '.join(unknown)}")
+    registry = catalog.registry_for(config.capabilities)
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        language=config.language,
+        timezone=config.display_timezone,
+    )
+    tool_count = len(registry.available_for(ToolContext(
+        interface="research_chat",
+        user_id="0",
+        setup=frozenset({"research_store", "market_data", "llm"}),
+    )))
+    log.info("ResearchChatBot listening with %d enabled tools", tool_count)
+    TelegramResearchBot(
+        token=config.tg_token,
+        service=service,
+        allowed_chat_ids=config.tg_allowed_chat_ids,
+    ).listen()
+    return 0
+
+
 def cmd_report(_args: argparse.Namespace) -> int:
     config = _load_config()
     store = SqliteStore(config.db_path)
@@ -1030,6 +1104,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Override with comma-separated name:start:end (start/end YYYY-MM-DD)"
     )
     sub.add_parser("track-positions", help="Run one position lifecycle tracking tick")
+    sub.add_parser("chat-bot", help="Run the Telegram research chat daemon")
     reconcile_parser = sub.add_parser("reconcile", help="Reconcile local DB vs Alpaca state")
     reconcile_parser.add_argument(
         "--yes", action="store_true",
@@ -1064,6 +1139,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_stress(args)
     if args.command == "track-positions":
         return cmd_track_positions(args)
+    if args.command == "chat-bot":
+        return cmd_chat_bot(args)
     if args.command == "reconcile":
         return cmd_reconcile(args)
     if args.command == "calibration":
