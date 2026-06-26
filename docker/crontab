@@ -1,5 +1,0 @@
-# Supercronic crontab — America/New_York
-# Hourly during market hours (Mon-Fri, 9am-4pm ET)
-0 9-16 * * 1-5    quanterback scan
-# Extra run 30 minutes after open
-30 9 * * 1-5      quanterback scan

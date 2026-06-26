@@ -1,6 +1,0 @@
-# Position lifecycle tracker.
-# Runs 24/7 because zombie-pending cleanup must clear stale orders
-# regardless of market hours (else cap stays locked on weekends).
-# Lifecycle detection (Alpaca polling) is a fast no-op when market
-# is closed, so 24/7 cadence is fine.
-*/5 * * * *    quanterback track-positions

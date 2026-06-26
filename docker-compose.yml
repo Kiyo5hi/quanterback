@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     image: quanterback:dev
-    command: supercronic /app/docker/crontab
+    command: supercronic /app/docker/cron/scheduler.cron
     volumes:
       - ./data:/data
       - ./config:/config:ro
@@ -32,15 +32,3 @@ services:
       - ./data:/data
       - ./config:/config:ro
     restart: unless-stopped
-
-  position-tracker:
-    image: quanterback:dev
-    command: supercronic /app/docker/cron/position-tracker.cron
-    volumes:
-      - ./data:/data
-      - ./config:/config:ro
-    environment:
-      - TZ=America/New_York
-    restart: unless-stopped
-    depends_on:
-      - scan

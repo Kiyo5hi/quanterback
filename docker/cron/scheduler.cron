@@ -1,0 +1,11 @@
+# Unified scheduler — America/New_York
+#
+# Entry scans during market hours (Mon-Fri, 9am-4pm ET).
+0 9-16 * * 1-5    quanterback scan
+# Extra run 30 minutes after open.
+30 9 * * 1-5      quanterback scan
+
+# Position lifecycle tracker.
+# Runs 24/7 because zombie-pending cleanup must clear stale orders
+# regardless of market hours (else cap stays locked on weekends).
+*/5 * * * *       quanterback track-positions

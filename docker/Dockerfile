@@ -31,7 +31,6 @@ RUN uv pip install --system -e ".[dev]"
 COPY src/ ./src/
 COPY tests/ ./tests/
 COPY config/ /config/
-COPY docker/crontab /app/docker/crontab
 COPY docker/cron/ /app/docker/cron/
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 RUN chmod +x /app/docker/entrypoint.sh
