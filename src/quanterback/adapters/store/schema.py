@@ -143,6 +143,73 @@ CREATE INDEX IF NOT EXISTS idx_pmd_scan_run
   ON position_management_decisions(scan_run_id);
 CREATE INDEX IF NOT EXISTS idx_pmd_ticker
   ON position_management_decisions(ticker);
+
+CREATE TABLE IF NOT EXISTS research_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  external_user_id TEXT NOT NULL,
+  external_chat_id TEXT,
+  display_name TEXT,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  locale TEXT NOT NULL DEFAULT 'en',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider, external_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS research_watchlist_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES research_users(id) ON DELETE CASCADE,
+  ticker TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'user',
+  notes TEXT DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  added_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(user_id, ticker)
+);
+CREATE INDEX IF NOT EXISTS idx_research_watchlist_user_enabled
+  ON research_watchlist_items(user_id, enabled, ticker);
+CREATE INDEX IF NOT EXISTS idx_research_watchlist_ticker_enabled
+  ON research_watchlist_items(ticker, enabled);
+
+CREATE TABLE IF NOT EXISTS research_scheduled_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES research_users(id) ON DELETE CASCADE,
+  job_type TEXT NOT NULL,
+  schedule_kind TEXT NOT NULL,
+  schedule_spec TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  delivery_channel TEXT NOT NULL,
+  delivery_target TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT,
+  last_run_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_research_jobs_due
+  ON research_scheduled_jobs(enabled, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_research_jobs_user
+  ON research_scheduled_jobs(user_id, enabled);
+
+CREATE TABLE IF NOT EXISTS research_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at TEXT NOT NULL,
+  user_id INTEGER REFERENCES research_users(id),
+  actor_provider TEXT,
+  actor_external_id TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id TEXT,
+  ticker TEXT,
+  request_json TEXT,
+  result_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_research_audit_user_time
+  ON research_audit_log(user_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_research_audit_action_time
+  ON research_audit_log(action, occurred_at);
 """
 
 

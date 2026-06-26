@@ -16,6 +16,12 @@ from quanterback.domain.persisted import (
     ScanRun,
 )
 from quanterback.domain.position import OpenLifecycle
+from quanterback.domain.research import (
+    ResearchAuditEvent,
+    ResearchScheduledJob,
+    ResearchUser,
+    ResearchWatchlistItem,
+)
 from quanterback.domain.watchlist import WatchlistEntry
 
 
@@ -390,6 +396,242 @@ class SqliteStore:
             "UPDATE positions SET state='closed', closed_at=? "
             "WHERE ticker=? AND state != 'closed'",
             (closed_at.isoformat(), ticker),
+        )
+
+    # --- research users/watchlists/jobs ---
+    def research_upsert_user(
+        self,
+        *,
+        provider: str,
+        external_user_id: str,
+        external_chat_id: str | None = None,
+        display_name: str | None = None,
+        timezone_name: str = "UTC",
+        locale: str = "en",
+    ) -> ResearchUser:
+        now = datetime.now(tz=timezone.utc)
+        self._conn.execute(
+            """
+            INSERT INTO research_users (
+              provider, external_user_id, external_chat_id, display_name,
+              timezone, locale, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, external_user_id) DO UPDATE SET
+              external_chat_id=excluded.external_chat_id,
+              display_name=excluded.display_name,
+              timezone=excluded.timezone,
+              locale=excluded.locale,
+              updated_at=excluded.updated_at
+            """,
+            (
+                provider,
+                external_user_id,
+                external_chat_id,
+                display_name,
+                timezone_name,
+                locale,
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        row = self._conn.execute(
+            """
+            SELECT id, provider, external_user_id, external_chat_id, display_name,
+                   timezone, locale, created_at, updated_at
+            FROM research_users
+            WHERE provider=? AND external_user_id=?
+            """,
+            (provider, external_user_id),
+        ).fetchone()
+        assert row is not None
+        return self._research_user_from_row(row)
+
+    def research_add_watchlist_item(
+        self,
+        user_id: int,
+        ticker: str,
+        *,
+        source: str = "user",
+        notes: str = "",
+    ) -> bool:
+        ticker = ticker.strip().upper()
+        now = datetime.now(tz=timezone.utc)
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO research_watchlist_items (
+                  user_id, ticker, source, notes, enabled, added_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                """,
+                (user_id, ticker, source, notes, now.isoformat(), now.isoformat()),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            self._conn.execute(
+                """
+                UPDATE research_watchlist_items
+                SET enabled=1, source=?, notes=?, updated_at=?
+                WHERE user_id=? AND ticker=?
+                """,
+                (source, notes, now.isoformat(), user_id, ticker),
+            )
+            return False
+
+    def research_remove_watchlist_item(self, user_id: int, ticker: str) -> bool:
+        ticker = ticker.strip().upper()
+        cur = self._conn.execute(
+            """
+            UPDATE research_watchlist_items
+            SET enabled=0, updated_at=?
+            WHERE user_id=? AND ticker=? AND enabled=1
+            """,
+            (datetime.now(tz=timezone.utc).isoformat(), user_id, ticker),
+        )
+        return int(cur.rowcount or 0) > 0
+
+    def research_list_watchlist_items(
+        self, user_id: int, *, enabled_only: bool = True,
+    ) -> list[ResearchWatchlistItem]:
+        sql = (
+            "SELECT id, user_id, ticker, source, notes, enabled, added_at, updated_at "
+            "FROM research_watchlist_items WHERE user_id=?"
+        )
+        params: tuple[object, ...] = (user_id,)
+        if enabled_only:
+            sql += " AND enabled=1"
+        sql += " ORDER BY ticker"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._research_watchlist_item_from_row(r) for r in rows]
+
+    def research_create_scheduled_job(
+        self,
+        *,
+        user_id: int,
+        job_type: str,
+        schedule_kind: str,
+        schedule_spec: str,
+        timezone_name: str,
+        delivery_channel: str,
+        delivery_target: str,
+        next_run_at: datetime | None = None,
+    ) -> int:
+        now = datetime.now(tz=timezone.utc)
+        cur = self._conn.execute(
+            """
+            INSERT INTO research_scheduled_jobs (
+              user_id, job_type, schedule_kind, schedule_spec, timezone,
+              delivery_channel, delivery_target, enabled, next_run_at,
+              created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            """,
+            (
+                user_id,
+                job_type,
+                schedule_kind,
+                schedule_spec,
+                timezone_name,
+                delivery_channel,
+                delivery_target,
+                next_run_at.isoformat() if next_run_at else None,
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+    def research_list_due_scheduled_jobs(
+        self, now: datetime, *, limit: int = 50,
+    ) -> list[ResearchScheduledJob]:
+        rows = self._conn.execute(
+            """
+            SELECT id, user_id, job_type, schedule_kind, schedule_spec, timezone,
+                   delivery_channel, delivery_target, enabled, next_run_at,
+                   last_run_at, created_at, updated_at
+            FROM research_scheduled_jobs
+            WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+            ORDER BY next_run_at ASC, id ASC
+            LIMIT ?
+            """,
+            (now.isoformat(), limit),
+        ).fetchall()
+        return [self._research_job_from_row(r) for r in rows]
+
+    def research_insert_audit_event(self, event: ResearchAuditEvent) -> int:
+        cur = self._conn.execute(
+            """
+            INSERT INTO research_audit_log (
+              occurred_at, user_id, actor_provider, actor_external_id, action,
+              entity_type, entity_id, ticker, request_json, result_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.occurred_at.isoformat(),
+                event.user_id,
+                event.actor_provider,
+                event.actor_external_id,
+                event.action,
+                event.entity_type,
+                event.entity_id,
+                event.ticker,
+                event.request_json,
+                event.result_json,
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+    @staticmethod
+    def _research_user_from_row(row: sqlite3.Row) -> ResearchUser:
+        return ResearchUser(
+            id=row["id"],
+            provider=row["provider"],
+            external_user_id=row["external_user_id"],
+            external_chat_id=row["external_chat_id"],
+            display_name=row["display_name"],
+            timezone=row["timezone"],
+            locale=row["locale"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _research_watchlist_item_from_row(row: sqlite3.Row) -> ResearchWatchlistItem:
+        return ResearchWatchlistItem(
+            id=row["id"],
+            user_id=row["user_id"],
+            ticker=row["ticker"],
+            source=row["source"],
+            notes=row["notes"] or "",
+            enabled=bool(row["enabled"]),
+            added_at=datetime.fromisoformat(row["added_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _research_job_from_row(row: sqlite3.Row) -> ResearchScheduledJob:
+        return ResearchScheduledJob(
+            id=row["id"],
+            user_id=row["user_id"],
+            job_type=row["job_type"],
+            schedule_kind=row["schedule_kind"],
+            schedule_spec=row["schedule_spec"],
+            timezone=row["timezone"],
+            delivery_channel=row["delivery_channel"],
+            delivery_target=row["delivery_target"],
+            enabled=bool(row["enabled"]),
+            next_run_at=(
+                datetime.fromisoformat(row["next_run_at"])
+                if row["next_run_at"] else None
+            ),
+            last_run_at=(
+                datetime.fromisoformat(row["last_run_at"])
+                if row["last_run_at"] else None
+            ),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
         )
 
     # --- watchlist ---
