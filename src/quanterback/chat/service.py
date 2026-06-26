@@ -19,6 +19,10 @@ class ResearchChatService:
     store: ResearchStore
     registry: ToolRegistry
     router: ResearchChatRouter = field(default_factory=ResearchChatRouter)
+    interface: str = "research_chat"
+    setup: frozenset[str] = field(
+        default_factory=lambda: frozenset({"research_store", "market_data", "llm"})
+    )
     language: str = "zh"
     timezone: str = "UTC"
     pending: dict[str, PendingToolCall] = field(default_factory=dict)
@@ -60,11 +64,13 @@ class ResearchChatService:
         self, tool_name: str, params: dict, *, user_id: int, confirmed: bool,
     ) -> ChatReply:
         context = ToolContext(
-            interface="research_chat",
+            interface=self.interface,
             user_id=str(user_id),
+            chat_id=None,
+            message_id=0,
             language=self.language,
             timezone=self.timezone,
-            setup=frozenset({"research_store", "market_data", "llm"}),
+            setup=self.setup,
         )
         try:
             result = self.registry.execute(
@@ -100,9 +106,9 @@ class ResearchChatService:
 
     def help_text(self) -> str:
         manifests = self.registry.available_for(ToolContext(
-            interface="research_chat",
+            interface=self.interface,
             user_id="0",
-            setup=frozenset({"research_store", "market_data", "llm"}),
+            setup=self.setup,
         ))
         names = "\n".join(f"- `{m.name}`" for m in manifests)
         return (
@@ -116,4 +122,3 @@ class ResearchChatService:
     @staticmethod
     def _pending_key(provider: str, user_id: str, chat_id: str) -> str:
         return f"{provider}:{user_id}:{chat_id}"
-

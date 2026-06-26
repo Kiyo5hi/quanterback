@@ -14,6 +14,7 @@ from quanterback.tools.research import (
     watchlist_list_tool,
     watchlist_remove_tool,
 )
+from quanterback.tools.trading import build_trading_tools
 
 
 CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
@@ -29,6 +30,23 @@ CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "research.schedule_digest",
         "research.cancel_digest",
         "research.list_jobs",
+    ),
+    "trading.control": (
+        "trading.freeze",
+        "trading.unfreeze",
+        "trading.halt",
+        "trading.unhalt",
+    ),
+    "trading.scan": (
+        "trading.scan_tickers",
+        "trading.preview_tickers",
+        "trading.rescan_watchlist",
+    ),
+    "trading.status": ("trading.status",),
+    "trading.watchlist": (
+        "trading.watchlist_add",
+        "trading.watchlist_remove",
+        "trading.watchlist_list",
     ),
 }
 
@@ -103,6 +121,13 @@ def build_research_catalog(
         catalog.register(schedule_digest_tool(store))
         catalog.register(cancel_digest_tool(store))
         catalog.register(list_jobs_tool(store))
+    return catalog
+
+
+def build_trading_catalog(**kwargs: object) -> CapabilityCatalog:
+    catalog = CapabilityCatalog()
+    for tool in build_trading_tools(**kwargs):  # type: ignore[arg-type]
+        catalog.register(tool)
     return catalog
 
 

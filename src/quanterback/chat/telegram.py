@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
@@ -20,12 +21,14 @@ class TelegramResearchBot:
         service: ResearchChatService,
         allowed_chat_ids: tuple[str, ...] = (),
         poll_timeout: int = 25,
+        max_workers: int = 8,
         max_iterations: int | None = None,
     ) -> None:
         self._token = token
         self._service = service
         self._allowed_chat_ids = set(allowed_chat_ids)
         self._poll_timeout = poll_timeout
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="chat")
         self._last_update_id = 0
         self._max_iterations = max_iterations
         self._get_updates = f"https://api.telegram.org/bot{token}/getUpdates"
@@ -37,12 +40,15 @@ class TelegramResearchBot:
                 log.info("Ignoring research chat message from unauthorized chat %s",
                          request.external_chat_id)
                 continue
-            try:
-                reply = self._service.handle(request)
-                self._reply(request, reply.text)
-            except Exception as exc:
-                log.exception("Research chat request failed: %s", exc)
-                self._reply(request, f"处理失败: {str(exc)[:300]}")
+            self._executor.submit(self._handle_one, request)
+
+    def _handle_one(self, request: ChatRequest) -> None:
+        try:
+            reply = self._service.handle(request)
+            self._reply(request, reply.text)
+        except Exception as exc:
+            log.exception("Research chat request failed: %s", exc)
+            self._reply(request, f"处理失败: {str(exc)[:300]}")
 
     def _updates(self) -> Iterable[ChatRequest]:
         iters = 0
@@ -134,4 +140,3 @@ def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if cur:
         out.append(cur)
     return out
-

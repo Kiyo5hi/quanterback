@@ -31,3 +31,13 @@ def test_router_confirm_cancel_help() -> None:
     assert r.route("取消").kind == "cancel"
     assert r.route("/help").kind == "help"
 
+
+def test_router_maps_trading_commands_when_enabled() -> None:
+    r = ResearchChatRouter(enable_trading_commands=True)
+
+    assert r.route("/status").tool_name == "trading.status"
+    assert r.route("/freeze").tool_name == "trading.freeze"
+    assert r.route("/scan nvda").tool_name == "trading.scan_tickers"
+    assert r.route("/preview nvda").tool_name == "trading.preview_tickers"
+    assert r.route("/rescan").tool_name == "trading.rescan_watchlist"
+    assert r.route("/watchlist add nvda").tool_name == "trading.watchlist_add"

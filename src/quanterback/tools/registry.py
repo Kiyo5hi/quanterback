@@ -33,6 +33,8 @@ class ToolContext(BaseModel):
 
     interface: str
     user_id: str | None = None
+    chat_id: str | None = None
+    message_id: int = 0
     language: str = "zh"
     timezone: str = "UTC"
     setup: frozenset[str] = Field(default_factory=frozenset)

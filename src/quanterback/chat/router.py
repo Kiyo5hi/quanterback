@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from quanterback.chat.models import ChatIntent
 
 _TICKER_RE = re.compile(r"\b[A-Z][A-Z0-9.\-]{0,9}\b")
 
 
+@dataclass
 class ResearchChatRouter:
     """Small deterministic router for v1 chat.
 
     Command-based UX is kept as a shortcut layer, not as a separate command
     implementation. Both slash commands and natural text resolve to tool calls.
     """
+
+    enable_trading_commands: bool = False
 
     def route(self, text: str) -> ChatIntent:
         raw = text.strip()
@@ -33,6 +37,10 @@ class ResearchChatRouter:
         tokens = raw.split()
         head = tokens[0].split("@", 1)[0].lower()
         args = tokens[1:]
+        if self.enable_trading_commands:
+            routed = self._route_trading_command(head, args)
+            if routed is not None:
+                return routed
         if head in {"/analyze", "/ask", "/ticker"} and args:
             return ChatIntent(
                 kind="tool",
@@ -69,6 +77,58 @@ class ResearchChatRouter:
                 params=params,
             )
         return ChatIntent(kind="help", confidence=0.3)
+
+    def _route_trading_command(self, head: str, args: list[str]) -> ChatIntent | None:
+        if head in {"/status"}:
+            return ChatIntent(kind="tool", tool_name="trading.status")
+        if head in {"/freeze", "/unfreeze", "/halt", "/unhalt"}:
+            return ChatIntent(
+                kind="tool",
+                tool_name=f"trading.{head[1:]}",
+                params={},
+            )
+        if head in {"/scan"} and args:
+            return ChatIntent(
+                kind="tool",
+                tool_name="trading.scan_tickers",
+                params={"tickers": [a.upper() for a in args]},
+            )
+        if head in {"/preview"}:
+            return ChatIntent(
+                kind="tool",
+                tool_name="trading.preview_tickers",
+                params={"tickers": [a.upper() for a in args]},
+            )
+        if head in {"/rescan"}:
+            return ChatIntent(kind="tool", tool_name="trading.rescan_watchlist")
+        if head in {"/watchlist"}:
+            if not args or args[0].lower() == "list":
+                return ChatIntent(kind="tool", tool_name="trading.watchlist_list")
+            if args[0].lower() == "add" and len(args) >= 2:
+                return ChatIntent(
+                    kind="tool",
+                    tool_name="trading.watchlist_add",
+                    params={"ticker": args[1].upper()},
+                )
+            if args[0].lower() == "remove" and len(args) >= 2:
+                return ChatIntent(
+                    kind="tool",
+                    tool_name="trading.watchlist_remove",
+                    params={"ticker": args[1].upper()},
+                )
+        if head in {"/add"} and args:
+            return ChatIntent(
+                kind="tool",
+                tool_name="trading.watchlist_add",
+                params={"ticker": args[0].upper()},
+            )
+        if head in {"/remove"} and args:
+            return ChatIntent(
+                kind="tool",
+                tool_name="trading.watchlist_remove",
+                params={"ticker": args[0].upper()},
+            )
+        return None
 
     def _route_natural(self, raw: str) -> ChatIntent:
         lowered = raw.lower()
@@ -126,4 +186,3 @@ def _parse_digest_args(args: list[str]) -> dict:
     if args:
         params["schedule_spec"] = {"raw": " ".join(args)}
     return params
-

@@ -384,6 +384,54 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
     from quanterback.adapters.control.telegram_commands import register_commands
     register_commands(token)  # best-effort
 
+    from quanterback.chat.router import ResearchChatRouter
+    from quanterback.chat.service import ResearchChatService
+    from quanterback.chat.telegram import TelegramResearchBot
+    from quanterback.tools.capabilities import CapabilitySelection, build_trading_catalog
+    from quanterback.tools.registry import ToolContext
+
+    def render_status() -> str:
+        ctx = _build_status_context(broker, store, sys_state, config, i18n)
+        return i18n.render("control_status_reply", **ctx)
+
+    trading_selection = CapabilitySelection(enabled=(
+        "trading.control",
+        "trading.scan",
+        "trading.status",
+        "trading.watchlist",
+    ))
+    catalog = build_trading_catalog(
+        store=store,
+        sys_state=sys_state,
+        render_status=render_status,
+    )
+    unknown = catalog.unknown_tool_names(trading_selection)
+    if unknown:
+        raise ValueError(f"Trading bot references unknown tools: {', '.join(unknown)}")
+    registry = catalog.registry_for(trading_selection)
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        router=ResearchChatRouter(enable_trading_commands=True),
+        interface="trader_bot",
+        setup=frozenset({"trading_state"}),
+        language=config.language,
+        timezone=config.display_timezone,
+    )
+    log.info("ControlBot listening via tool host with %d enabled tools", len(
+        registry.available_for(ToolContext(
+            interface="trader_bot",
+            user_id="0",
+            setup=frozenset({"trading_state"}),
+        ))
+    ))
+    TelegramResearchBot(
+        token=token,
+        service=service,
+        allowed_chat_ids=config.tg_chat_ids,
+    ).listen()
+    return 0
+
     import subprocess
 
     import requests
