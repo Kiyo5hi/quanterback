@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from quanterback.adapters.store.sqlite_store import SqliteStore
 from quanterback.domain.decision import StrategyDecision
-from quanterback.tools.capabilities import CapabilityCatalog, CapabilitySelection
+from quanterback.tools.capabilities import (
+    CapabilityCatalog,
+    CapabilitySelection,
+    build_research_catalog,
+)
 from quanterback.tools.registry import ToolContext
 from quanterback.tools.research import analyze_ticker_tool
 
@@ -94,3 +99,37 @@ def test_catalog_reports_unknown_selected_tools() -> None:
         "research.watchlist_remove",
     )
 
+
+def test_build_research_catalog_registers_store_tools(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    selection = CapabilitySelection(enabled=("research.watchlist", "research.digest_jobs"))
+    catalog = build_research_catalog(store=store)
+
+    assert catalog.unknown_tool_names(selection) == ()
+    registry = catalog.registry_for(selection)
+    names = [
+        manifest.name
+        for manifest in registry.available_for(
+            ToolContext(
+                interface="research_chat",
+                user_id="1",
+                setup=frozenset({"research_store"}),
+            ),
+        )
+    ]
+
+    assert names == [
+        "research.cancel_digest",
+        "research.list_jobs",
+        "research.schedule_digest",
+        "research.watchlist_add",
+        "research.watchlist_list",
+        "research.watchlist_remove",
+    ]
+
+
+def test_build_research_catalog_registers_analyzer_tool() -> None:
+    catalog = build_research_catalog(analyzer=FakeAnalyzer())  # type: ignore[arg-type]
+    selection = CapabilitySelection(enabled=("research.analyze_ticker",))
+
+    assert catalog.unknown_tool_names(selection) == ()

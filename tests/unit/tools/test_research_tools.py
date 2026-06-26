@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
+from quanterback.adapters.store.sqlite_store import SqliteStore
 from quanterback.domain.decision import StrategyDecision
 from quanterback.tools.registry import ToolContext, ToolRegistry, ToolSideEffect
-from quanterback.tools.research import analyze_ticker_tool
+from quanterback.tools.research import (
+    analyze_ticker_tool,
+    cancel_digest_tool,
+    list_jobs_tool,
+    schedule_digest_tool,
+    watchlist_add_tool,
+    watchlist_list_tool,
+    watchlist_remove_tool,
+)
 
 
 @dataclass
@@ -84,3 +94,99 @@ def test_registry_lists_only_tools_available_for_context() -> None:
     assert none == []
     assert [m.name for m in available] == ["research.analyze_ticker"]
 
+
+def test_watchlist_tools_use_authenticated_context_user(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    alice = store.research_upsert_user(provider="telegram", external_user_id="1")
+    bob = store.research_upsert_user(provider="telegram", external_user_id="2")
+    assert alice.id is not None
+    assert bob.id is not None
+    context = ToolContext(
+        interface="research_chat",
+        user_id=str(alice.id),
+        setup=frozenset({"research_store"}),
+    )
+
+    add = watchlist_add_tool(store).execute(
+        {"ticker": "nvda", "user_id": bob.id}, context,
+    )
+    listed = watchlist_list_tool(store).execute({}, context)
+    removed = watchlist_remove_tool(store).execute({"ticker": "NVDA"}, context)
+
+    assert add.ok is True
+    assert listed.data["tickers"] == ["NVDA"]
+    assert removed.data["removed"] is True
+    assert store.research_list_watchlist_items(bob.id) == []
+
+
+def test_watchlist_tools_require_user_context(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    result = watchlist_add_tool(store).execute(
+        {"ticker": "NVDA"},
+        ToolContext(interface="research_chat", setup=frozenset({"research_store"})),
+    )
+
+    assert result.ok is False
+    assert "user context" in result.message
+
+
+def test_digest_job_tools_schedule_list_and_cancel(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    user = store.research_upsert_user(provider="telegram", external_user_id="1")
+    assert user.id is not None
+    context = ToolContext(
+        interface="research_chat",
+        user_id=str(user.id),
+        timezone="America/Los_Angeles",
+        setup=frozenset({"research_store"}),
+    )
+
+    scheduled = schedule_digest_tool(store).execute(
+        {
+            "schedule_kind": "daily",
+            "schedule_spec": {"hour": 8, "minute": 30},
+            "next_run_at": datetime(2026, 6, 26, 15, tzinfo=timezone.utc).isoformat(),
+        },
+        context,
+    )
+    listed = list_jobs_tool(store).execute({}, context)
+    cancelled = cancel_digest_tool(store).execute(
+        {"job_id": scheduled.data["job_id"]}, context,
+    )
+    listed_after_cancel = list_jobs_tool(store).execute({}, context)
+
+    assert scheduled.ok is True
+    assert listed.data["count"] == 1
+    assert listed.data["jobs"][0]["timezone"] == "America/Los_Angeles"
+    assert cancelled.data["cancelled"] is True
+    assert listed_after_cancel.data["count"] == 0
+
+
+def test_digest_schedule_requires_confirmation_metadata(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    tool = schedule_digest_tool(store)
+
+    assert tool.manifest.requires_confirmation is True
+    assert tool.manifest.side_effect == ToolSideEffect.USER_WRITE
+
+
+def test_digest_schedule_requires_registry_confirmation(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    user = store.research_upsert_user(provider="telegram", external_user_id="1")
+    assert user.id is not None
+    registry = ToolRegistry([schedule_digest_tool(store)])
+    context = ToolContext(
+        interface="research_chat",
+        user_id=str(user.id),
+        setup=frozenset({"research_store"}),
+    )
+
+    blocked = registry.execute("research.schedule_digest", {}, context)
+    jobs_after_block = store.research_list_scheduled_jobs(user.id)
+    ok = registry.execute("research.schedule_digest", {}, context, confirmed=True)
+
+    assert blocked.ok is False
+    assert blocked.data["confirmation_required"] is True
+    assert jobs_after_block == []
+    assert ok.ok is True
+    assert store.research_list_scheduled_jobs(user.id) != []

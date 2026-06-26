@@ -91,6 +91,28 @@ class ToolRegistry:
     def get(self, name: str) -> Tool:
         return self._tools[name]
 
+    def execute(
+        self,
+        name: str,
+        params: dict[str, Any],
+        context: ToolContext,
+        *,
+        confirmed: bool = False,
+    ) -> ToolResult:
+        tool = self.get(name)
+        if tool.manifest.requires_confirmation and not confirmed:
+            return ToolResult(
+                ok=False,
+                message=f"tool {name} requires confirmation",
+                data={
+                    "confirmation_required": True,
+                    "tool": name,
+                    "params": params,
+                    "side_effect": tool.manifest.side_effect.value,
+                },
+            )
+        return tool.execute(params, context)
+
     def available_for(self, context: ToolContext) -> list[ToolManifest]:
         out: list[ToolManifest] = []
         for tool in self._tools.values():
@@ -103,4 +125,3 @@ class ToolRegistry:
                 continue
             out.append(manifest)
         return sorted(out, key=lambda m: m.name)
-

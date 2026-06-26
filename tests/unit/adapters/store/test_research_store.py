@@ -71,6 +71,7 @@ def test_research_due_jobs_and_audit(tmp_path) -> None:
     )
 
     due = store.research_list_due_scheduled_jobs(now)
+    listed = store.research_list_scheduled_jobs(user.id)
     audit_id = store.research_insert_audit_event(
         ResearchAuditEvent(
             occurred_at=now,
@@ -86,5 +87,11 @@ def test_research_due_jobs_and_audit(tmp_path) -> None:
     )
 
     assert [j.id for j in due] == [due_id]
+    assert [j.id for j in listed] == [due_id, due_id + 1]
+    assert store.research_cancel_scheduled_job(user.id, due_id) is True
+    assert store.research_cancel_scheduled_job(user.id, due_id) is False
+    assert [j.id for j in store.research_list_scheduled_jobs(user.id)] == [due_id + 1]
+    assert {j.id for j in store.research_list_scheduled_jobs(user.id, enabled_only=False)} == {
+        due_id, due_id + 1,
+    }
     assert audit_id > 0
-

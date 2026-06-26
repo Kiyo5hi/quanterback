@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from quanterback.capabilities.research import ResearchAnalyzer
+from quanterback.interfaces.research_store import ResearchStore
 from quanterback.tools.registry import Tool, ToolRegistry
+from quanterback.tools.research import (
+    analyze_ticker_tool,
+    cancel_digest_tool,
+    list_jobs_tool,
+    schedule_digest_tool,
+    watchlist_add_tool,
+    watchlist_list_tool,
+    watchlist_remove_tool,
+)
 
 
 CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
@@ -77,6 +88,24 @@ class CapabilityCatalog:
         return tuple(sorted(selected_names - set(self.tools)))
 
 
+def build_research_catalog(
+    *,
+    analyzer: ResearchAnalyzer | None = None,
+    store: ResearchStore | None = None,
+) -> CapabilityCatalog:
+    catalog = CapabilityCatalog()
+    if analyzer is not None:
+        catalog.register(analyze_ticker_tool(analyzer))
+    if store is not None:
+        catalog.register(watchlist_add_tool(store))
+        catalog.register(watchlist_remove_tool(store))
+        catalog.register(watchlist_list_tool(store))
+        catalog.register(schedule_digest_tool(store))
+        catalog.register(cancel_digest_tool(store))
+        catalog.register(list_jobs_tool(store))
+    return catalog
+
+
 def _as_tuple(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -85,4 +114,3 @@ def _as_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(v) for v in value)
     raise TypeError(f"expected string/list/tuple, got {type(value).__name__}")
-

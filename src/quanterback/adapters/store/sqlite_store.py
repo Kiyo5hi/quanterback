@@ -542,6 +542,21 @@ class SqliteStore:
         )
         return int(cur.lastrowid or 0)
 
+    def research_list_scheduled_jobs(
+        self, user_id: int, *, enabled_only: bool = True,
+    ) -> list[ResearchScheduledJob]:
+        sql = (
+            "SELECT id, user_id, job_type, schedule_kind, schedule_spec, timezone, "
+            "delivery_channel, delivery_target, enabled, next_run_at, last_run_at, "
+            "created_at, updated_at "
+            "FROM research_scheduled_jobs WHERE user_id=?"
+        )
+        if enabled_only:
+            sql += " AND enabled=1"
+        sql += " ORDER BY enabled DESC, next_run_at ASC, id ASC"
+        rows = self._conn.execute(sql, (user_id,)).fetchall()
+        return [self._research_job_from_row(r) for r in rows]
+
     def research_list_due_scheduled_jobs(
         self, now: datetime, *, limit: int = 50,
     ) -> list[ResearchScheduledJob]:
@@ -558,6 +573,17 @@ class SqliteStore:
             (now.isoformat(), limit),
         ).fetchall()
         return [self._research_job_from_row(r) for r in rows]
+
+    def research_cancel_scheduled_job(self, user_id: int, job_id: int) -> bool:
+        cur = self._conn.execute(
+            """
+            UPDATE research_scheduled_jobs
+            SET enabled=0, updated_at=?
+            WHERE user_id=? AND id=? AND enabled=1
+            """,
+            (datetime.now(tz=timezone.utc).isoformat(), user_id, job_id),
+        )
+        return int(cur.rowcount or 0) > 0
 
     def research_insert_audit_event(self, event: ResearchAuditEvent) -> int:
         cur = self._conn.execute(
