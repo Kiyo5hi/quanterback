@@ -61,3 +61,12 @@ def test_humanize_reject_handles_legacy_riskgate_prefix() -> None:
     result = humanize_reject("riskgate: 'sanity_max_drawdown'", "en")
     assert "risk gate:" in result
     assert "drawdown > 50%" in result
+
+
+def test_humanize_reject_handles_market_data_zh() -> None:
+    result = humanize_reject(
+        "market_data: ATR14 unavailable or zero; ticker may be halted",
+        "zh",
+    )
+    assert result.startswith("行情数据不可用:")
+    assert "ATR14 unavailable or zero" in result

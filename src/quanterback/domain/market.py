@@ -8,6 +8,10 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class MarketDataQualityError(ValueError):
+    """Raised when fetched market data cannot support trading analysis."""
+
+
 class TrendRegime(str, Enum):  # noqa: UP042
     UPTREND = "uptrend"
     DOWNTREND = "downtrend"

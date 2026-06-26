@@ -20,6 +20,7 @@ from quanterback.domain.market import (
     FundamentalLite,
     InsiderActivity,
     IntradaySignals,
+    MarketDataQualityError,
     MomentumSignals,
     MovingAverages,
     NewsItem,
@@ -52,16 +53,17 @@ class RuleBasedSummarizer:
         short_interest: ShortInterestSnapshot | None = None,
         eps_trend: EpsTrend | None = None,
         fundamental_ratios: dict | None = None,
+        allow_short_history: bool = False,
     ) -> CondensedSummary:
         daily = w.daily
         hourly = w.hourly
         closes = daily["close"]
 
         price = self._price_snapshot(closes)
-        ma = self._moving_averages(closes)
-        vol = self._vol_profile(daily)
+        ma = self._moving_averages(closes, allow_short_history=allow_short_history)
+        vol = self._vol_profile(daily, hourly=hourly, allow_short_history=allow_short_history)
         volprof = self._volume_profile(daily)
-        tech = self._technicals(closes)
+        tech = self._technicals(closes, allow_short_history=allow_short_history)
 
         # Compute days_to_next_earnings if earnings_date provided
         days_to_earnings = None
@@ -119,11 +121,29 @@ class RuleBasedSummarizer:
             pct_from_52w_low=(last / lo - 1) if lo > 0 else 0.0,
         )
 
-    def _moving_averages(self, closes: pd.Series) -> MovingAverages:
-        sma20 = float(simple_moving_average(closes, 20).iloc[-1])
-        sma50 = float(simple_moving_average(closes, 50).iloc[-1])
-        sma200 = float(simple_moving_average(closes, 200).iloc[-1])
+    def _moving_averages(
+        self, closes: pd.Series, *, allow_short_history: bool = False,
+    ) -> MovingAverages:
+        def _sma(window: int) -> float:
+            value = float(simple_moving_average(closes, window).iloc[-1])
+            if np.isfinite(value) or not allow_short_history:
+                return value
+            return float(closes.tail(min(window, len(closes))).mean())
+
+        sma20 = _sma(20)
+        sma50 = _sma(50)
+        sma200 = _sma(200)
         last = float(closes.iloc[-1])
+        if not np.isfinite(last) or last <= 0:
+            raise MarketDataQualityError(
+                "last close unavailable or non-positive; ticker has bad price data"
+            )
+        if allow_short_history and not all(
+            np.isfinite(v) and v > 0 for v in (sma20, sma50, sma200)
+        ):
+            raise MarketDataQualityError(
+                "moving averages unavailable; ticker has insufficient or bad price history"
+            )
         alignment: Literal["bullish", "bearish", "mixed"]
         if sma20 > sma50 > sma200:
             alignment = "bullish"
@@ -137,11 +157,28 @@ class RuleBasedSummarizer:
             pct_above_sma_200=last / sma200 - 1, alignment=alignment,
         )
 
-    def _vol_profile(self, daily: pd.DataFrame) -> VolatilityProfile:
+    def _vol_profile(
+        self,
+        daily: pd.DataFrame,
+        *,
+        hourly: pd.DataFrame | None = None,
+        allow_short_history: bool = False,
+    ) -> VolatilityProfile:
         closes = daily["close"]
         rv_current = realized_vol_annualized(closes, 20)
         atr = float(atr_wilder(daily, 14).iloc[-1])
-        atr_pct = atr / float(closes.iloc[-1]) if float(closes.iloc[-1]) > 0 else 0.0
+        last_close = float(closes.iloc[-1])
+        if (not np.isfinite(atr) or atr <= 0) and allow_short_history:
+            atr = self._short_history_atr(daily, hourly=hourly)
+        if not np.isfinite(atr) or atr <= 0:
+            raise MarketDataQualityError(
+                "ATR14 unavailable or zero; ticker may be halted, stale, or have bad OHLC data"
+            )
+        if not np.isfinite(last_close) or last_close <= 0:
+            raise MarketDataQualityError(
+                "last close unavailable or non-positive; ticker has bad price data"
+            )
+        atr_pct = atr / last_close
 
         # Compute rolling 20-day annualized realized vol over the full window,
         # then classify the latest reading against the ticker's own distribution.
@@ -177,6 +214,38 @@ class RuleBasedSummarizer:
             atr_pct_of_price=atr_pct, regime=regime,
         )
 
+    def _short_history_atr(
+        self, daily: pd.DataFrame, *, hourly: pd.DataFrame | None = None,
+    ) -> float:
+        close = daily["close"]
+        if len(daily) >= 2:
+            high = daily["high"]
+            low = daily["low"]
+            prev_close = close.shift(1)
+            tr = pd.concat(
+                [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
+                axis=1,
+            ).max(axis=1).dropna()
+            if len(tr) >= 2:
+                value = float(tr.tail(min(14, len(tr))).mean())
+                if np.isfinite(value) and value > 0:
+                    return value
+
+        if hourly is not None and len(hourly) >= 4:
+            high = hourly["high"]
+            low = hourly["low"]
+            prev_close = hourly["close"].shift(1)
+            tr = pd.concat(
+                [(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()],
+                axis=1,
+            ).max(axis=1).dropna()
+            if len(tr) >= 2:
+                # Roughly six and a half regular-session hours per trading day.
+                value = float(tr.tail(min(14 * 7, len(tr))).mean() * 6.5)
+                if np.isfinite(value) and value > 0:
+                    return value
+        return float("nan")
+
     def _volume_profile(self, daily: pd.DataFrame) -> VolumeProfile:
         vol = daily["volume"]
         last = int(vol.iloc[-1])
@@ -195,9 +264,25 @@ class RuleBasedSummarizer:
             volume_ratio=ratio, regime=regime,
         )
 
-    def _technicals(self, closes: pd.Series) -> TechnicalIndicators:
+    def _technicals(
+        self, closes: pd.Series, *, allow_short_history: bool = False,
+    ) -> TechnicalIndicators:
+        rsi = float(rsi_wilder(closes, 14).iloc[-1])
+        if allow_short_history and len(closes) < 15:
+            deltas = closes.diff().dropna()
+            gains = deltas.clip(lower=0.0).sum()
+            losses = -deltas.clip(upper=0.0).sum()
+            if losses == 0 and gains > 0:
+                rsi = 100.0
+            elif gains == 0 and losses > 0:
+                rsi = 0.0
+            elif gains > 0 and losses > 0:
+                rs = gains / losses
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 50.0
         return TechnicalIndicators(
-            rsi_14=float(rsi_wilder(closes, 14).iloc[-1]),
+            rsi_14=rsi,
             macd_signal=macd_recent_cross(closes, window=5),
         )
 

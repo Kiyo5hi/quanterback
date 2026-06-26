@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+from urllib.parse import quote_plus
+import xml.etree.ElementTree as ET
 
 import pandas as pd
+import requests
 import yfinance as yf  # type: ignore[import-untyped]
 
 from quanterback.domain.market import (
@@ -80,11 +84,11 @@ class YFinanceProvider:
         df.to_parquet(path)
         return df
 
-    def fetch_news(self, ticker: str, limit: int = 5) -> list[NewsItem]:
-        """Returns last `limit` headlines from yfinance, filtered to 7 days.
+    def fetch_news(self, ticker: str, limit: int = 10) -> list[NewsItem]:
+        """Returns recent headlines from multiple best-effort free sources.
 
         Cache: 1 hour. Yfinance news endpoint is unreliable — failures are
-        swallowed and return empty list.
+        swallowed and supplemented with RSS sources.
         """
         ticker = ticker.upper()
         now = datetime.now(tz=timezone.utc)
@@ -110,12 +114,34 @@ class YFinanceProvider:
                     log.warning("News cache read failed for %s: %s", ticker, e)
 
         # Fresh fetch — best-effort
+        out: list[NewsItem] = []
         try:
-            items = yf.Ticker(ticker).news or []
+            out.extend(self._fetch_yfinance_news(ticker, now))
         except Exception as e:
             log.warning("yfinance news fetch failed for %s: %s", ticker, e)
-            items = []
+        out.extend(self._fetch_yahoo_rss_news(ticker, now))
+        out.extend(self._fetch_google_news(ticker, now))
 
+        out = self._dedupe_news(out)
+        out.sort(key=lambda n: n.age_hours)
+        out = out[:limit]
+
+        # Write cache
+        try:
+            if out:
+                df = pd.DataFrame([
+                    {"title": n.title, "publisher": n.publisher,
+                     "age_hours": n.age_hours, "link": n.link or ""}
+                    for n in out
+                ])
+                df.to_parquet(cache_path)
+        except Exception as e:
+            log.debug("News cache write failed for %s: %s", ticker, e)
+
+        return out
+
+    def _fetch_yfinance_news(self, ticker: str, now: datetime) -> list[NewsItem]:
+        items = yf.Ticker(ticker).news or []
         out: list[NewsItem] = []
         seven_days_ago = now - timedelta(days=7)
         for item in items:
@@ -154,24 +180,79 @@ class YFinanceProvider:
                 title=title, publisher=publisher,
                 age_hours=max(age_h, 0.0), link=link,
             ))
-
-        # Sort newest first
-        out.sort(key=lambda n: n.age_hours)
-        out = out[:limit]
-
-        # Write cache
-        try:
-            if out:
-                df = pd.DataFrame([
-                    {"title": n.title, "publisher": n.publisher,
-                     "age_hours": n.age_hours, "link": n.link or ""}
-                    for n in out
-                ])
-                df.to_parquet(cache_path)
-        except Exception as e:
-            log.debug("News cache write failed for %s: %s", ticker, e)
-
         return out
+
+    def _fetch_yahoo_rss_news(self, ticker: str, now: datetime) -> list[NewsItem]:
+        url = (
+            "https://feeds.finance.yahoo.com/rss/2.0/headline"
+            f"?s={quote_plus(ticker)}&region=US&lang=en-US"
+        )
+        return self._fetch_rss_news(url, now, default_publisher="Yahoo Finance")
+
+    def _fetch_google_news(self, ticker: str, now: datetime) -> list[NewsItem]:
+        query = quote_plus(f'{ticker} stock OR {ticker} ETF')
+        url = (
+            "https://news.google.com/rss/search"
+            f"?q={query}&hl=en-US&gl=US&ceid=US:en"
+        )
+        return self._fetch_rss_news(url, now, default_publisher="Google News")
+
+    def _fetch_rss_news(
+        self, url: str, now: datetime, *, default_publisher: str,
+    ) -> list[NewsItem]:
+        try:
+            resp = requests.get(
+                url,
+                timeout=8,
+                headers={"User-Agent": "quanterback/0.1 (+news-fetch)"},
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            log.debug("RSS news fetch failed for %s: %s", url, e)
+            return []
+
+        out: list[NewsItem] = []
+        seven_days_ago = now - timedelta(days=7)
+        try:
+            root = ET.fromstring(resp.content)
+        except ET.ParseError as e:
+            log.debug("RSS news parse failed for %s: %s", url, e)
+            return []
+
+        for item in root.findall(".//item"):
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip() or None
+            source = item.findtext("source")
+            publisher = (source or default_publisher).strip()
+            pub_text = item.findtext("pubDate") or ""
+            try:
+                pub_dt = parsedate_to_datetime(pub_text)
+                if pub_dt.tzinfo is None:
+                    pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                else:
+                    pub_dt = pub_dt.astimezone(timezone.utc)
+            except Exception:
+                pub_dt = now
+            if not title or pub_dt < seven_days_ago:
+                continue
+            age_h = (now - pub_dt).total_seconds() / 3600
+            out.append(NewsItem(
+                title=title, publisher=publisher,
+                age_hours=max(age_h, 0.0), link=link,
+            ))
+        return out
+
+    @staticmethod
+    def _dedupe_news(items: list[NewsItem]) -> list[NewsItem]:
+        deduped: list[NewsItem] = []
+        seen: set[str] = set()
+        for item in items:
+            key = (item.link or item.title).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def fetch_next_earnings_date(self, ticker: str) -> date | None:
         """Returns next earnings call date if known.
@@ -191,11 +272,7 @@ class YFinanceProvider:
                 try:
                     cached_df = pd.read_parquet(cache_path)
                     if not cached_df.empty and "date" in cached_df.columns:
-                        d = cached_df["date"].iloc[0]
-                        if pd.notna(d):
-                            if hasattr(d, "date"):
-                                return cast(date, d.date())
-                            return cast(date, d)
+                        return self._coerce_date(cached_df["date"].iloc[0])
                     return None
                 except Exception as e:
                     log.warning("Earnings date cache read failed for %s: %s", ticker, e)
@@ -210,20 +287,14 @@ class YFinanceProvider:
             ed_value = None
             if isinstance(cal, dict):
                 ed_value = cal.get("Earnings Date")
-                if isinstance(ed_value, list) and ed_value:
-                    ed_value = ed_value[0]
             elif hasattr(cal, "empty"):
                 if cal.empty or "Earnings Date" not in cal.columns:
                     return None
                 ed = cal["Earnings Date"]
                 ed_value = ed.iloc[0] if hasattr(ed, "iloc") else ed
-            if ed_value is None:
+            result = self._coerce_date(ed_value)
+            if result is None:
                 return None
-            result = (
-                cast(date, ed_value.date())
-                if hasattr(ed_value, "date")
-                else cast(date, ed_value)
-            )
 
             # Write cache
             try:
@@ -236,6 +307,33 @@ class YFinanceProvider:
         except Exception as e:
             log.warning("fetch_next_earnings_date(%s) failed: %s", ticker, e)
             return None
+
+    @staticmethod
+    def _coerce_date(value: Any) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            return YFinanceProvider._coerce_date(value[0])
+        if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+            try:
+                return YFinanceProvider._coerce_date(value.tolist())
+            except Exception:
+                pass
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            return None
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        return cast(date, parsed.date())
 
     def fetch_insider_activity(
         self, ticker: str, lookback_days: int = 30,

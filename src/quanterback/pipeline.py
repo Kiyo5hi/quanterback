@@ -11,6 +11,7 @@ import pandas as pd
 
 from quanterback.domain.backtest import BacktestRequest
 from quanterback.domain.events import NotificationEvent, ScanEvent
+from quanterback.domain.market import MarketDataQualityError
 from quanterback.domain.persisted import (
     PersistedBacktest,
     PersistedDecision,
@@ -378,7 +379,13 @@ class ScanPipeline:
             kwargs["eps_trend"] = eps_trend
         if "fundamental_ratios" in sig.parameters:
             kwargs["fundamental_ratios"] = fundamental_ratios
-        summary = self.summarizer.summarize(window, **kwargs)
+        if "allow_short_history" in sig.parameters:
+            kwargs["allow_short_history"] = preview_only
+        try:
+            summary = self.summarizer.summarize(window, **kwargs)
+        except MarketDataQualityError as exc:
+            self._persist_rejection(run_id, event.ticker, f"market_data: {exc}")
+            return
 
         # Enrich strategist with current positions if it supports them
         if hasattr(self.strategist, "set_current_positions"):

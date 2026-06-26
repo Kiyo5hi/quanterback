@@ -117,7 +117,11 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
             top_n=config.universe_top_n,
         )
     event_source = CompositeEventSource(
-        watchlist=watchlist, store=store, screener=screener,
+        watchlist=watchlist,
+        store=store,
+        screener=screener,
+        auto_add_screener_to_watchlist=config.universe_auto_add_to_watchlist,
+        auto_watchlist_max=config.universe_auto_watchlist_max,
     )
     pipeline = ScanPipeline(
         event_source=event_source,
@@ -500,6 +504,8 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
     # 8 workers is generous for typical use (1-3 concurrent TG sessions).
     # Submissions over the queue limit will block briefly, never silently drop.
     _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cmd")
+    single_ticker_timeout_s = 300
+    full_watchlist_timeout_s = 600
 
     def _dispatch(cmd):
         command = cmd.command
@@ -528,11 +534,12 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                     "control_scan_running", ticker_count=ticker_count,
                 ))
 
-                # Run scan synchronously via subprocess with 120s timeout
+                # Run scan synchronously via subprocess.
                 cmd_args = ["quanterback", "scan", "--format", "brief", "--tickers", ",".join(tickers)]
                 try:
                     result = subprocess.run(
-                        cmd_args, capture_output=True, text=True, timeout=120,
+                        cmd_args, capture_output=True, text=True,
+                        timeout=single_ticker_timeout_s,
                     )
                     if result.returncode != 0:
                         stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
@@ -544,7 +551,10 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                         log.info("scan subprocess succeeded for %d tickers", ticker_count)
                 except subprocess.TimeoutExpired:
                     final = i18n.render("control_scan_timeout")
-                    log.error("scan subprocess exceeded 120s timeout for tickers=%s", tickers)
+                    log.error(
+                        "scan subprocess exceeded %ss timeout for tickers=%s",
+                        single_ticker_timeout_s, tickers,
+                    )
                 except Exception as e:
                     final = i18n.render("control_scan_error", stderr=str(e)[-500:])
                     log.error("scan subprocess exception: %s", e)
@@ -552,11 +562,11 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
         elif command == "rescan":
             running_id = reply(cmd, i18n.render("control_rescan_running"))
 
-            # Run rescan synchronously via subprocess with 600s timeout (10 min)
+            # Run rescan synchronously via subprocess.
             try:
                 result = subprocess.run(
                     ["quanterback", "rescan", "--format", "brief"],
-                    capture_output=True, text=True, timeout=600,
+                    capture_output=True, text=True, timeout=full_watchlist_timeout_s,
                 )
                 if result.returncode != 0:
                     stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
@@ -568,7 +578,10 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                     log.info("rescan subprocess succeeded")
             except subprocess.TimeoutExpired:
                 final = i18n.render("control_rescan_timeout")
-                log.error("rescan subprocess exceeded 600s timeout")
+                log.error(
+                    "rescan subprocess exceeded %ss timeout",
+                    full_watchlist_timeout_s,
+                )
             except Exception as e:
                 final = i18n.render("control_rescan_error", stderr=str(e)[-500:])
                 log.error("rescan subprocess exception: %s", e)
@@ -580,12 +593,13 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                 running_id = reply(cmd, i18n.render(
                     "control_scan_running", ticker_count=ticker_count,
                 ))
-                # Run scan with --dry-run flag via subprocess with 120s timeout
+                # Run scan with --dry-run flag via subprocess.
                 cmd_args = ["quanterback", "scan", "--format", "brief", "--dry-run",
                             "--tickers", ",".join(tickers)]
                 try:
                     result = subprocess.run(
-                        cmd_args, capture_output=True, text=True, timeout=120,
+                        cmd_args, capture_output=True, text=True,
+                        timeout=single_ticker_timeout_s,
                     )
                     if result.returncode != 0:
                         stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
@@ -597,18 +611,21 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                         log.info("preview subprocess succeeded for %d tickers", ticker_count)
                 except subprocess.TimeoutExpired:
                     final = i18n.render("control_scan_timeout")
-                    log.error("preview subprocess exceeded 120s timeout for tickers=%s", tickers)
+                    log.error(
+                        "preview subprocess exceeded %ss timeout for tickers=%s",
+                        single_ticker_timeout_s, tickers,
+                    )
                 except Exception as e:
                     final = i18n.render("control_scan_error", stderr=str(e)[-500:])
                     log.error("preview subprocess exception: %s", e)
                 send_long(cmd, running_id, final, chat)
             else:
                 running_id = reply(cmd, i18n.render("control_rescan_running"))
-                # Run rescan with --dry-run flag via subprocess with 600s timeout
+                # Run rescan with --dry-run flag via subprocess.
                 try:
                     result = subprocess.run(
                         ["quanterback", "rescan", "--format", "brief", "--dry-run"],
-                        capture_output=True, text=True, timeout=600,
+                        capture_output=True, text=True, timeout=full_watchlist_timeout_s,
                     )
                     if result.returncode != 0:
                         stderr_tail = result.stderr[-500:] if result.stderr else "unknown error"
@@ -620,7 +637,10 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                         log.info("preview (full) subprocess succeeded")
                 except subprocess.TimeoutExpired:
                     final = i18n.render("control_rescan_timeout")
-                    log.error("preview (full) subprocess exceeded 600s timeout")
+                    log.error(
+                        "preview (full) subprocess exceeded %ss timeout",
+                        full_watchlist_timeout_s,
+                    )
                 except Exception as e:
                     final = i18n.render("control_rescan_error", stderr=str(e)[-500:])
                     log.error("preview (full) subprocess exception: %s", e)
@@ -713,7 +733,8 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
                 log.exception("Also failed to send error reply for /%s", cmd.command)
 
     # Spawn each command in its own daemon thread so slow handlers
-    # (/scan up to 120s, /rescan up to 600s) don't block the poll loop.
+    # (/scan up to single_ticker_timeout_s, /rescan up to full_watchlist_timeout_s)
+    # don't block the poll loop.
     # SqliteStore uses check_same_thread=False, subprocess releases GIL,
     # Jinja/I18n are read-only — safe to share across threads.
     for cmd in channel.listen():

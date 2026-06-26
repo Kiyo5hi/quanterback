@@ -292,12 +292,19 @@ def test_load_universe_screener_config(tmp_path: Path) -> None:
     toml = tmp_path / "c.toml"
     toml.write_text(
         _minimal_secrets_toml() +
-        '[universe]\nenabled = false\npath = "/tmp/u.txt"\ntop_n = 20\n'
+        '[universe]\n'
+        'enabled = false\n'
+        'path = "/tmp/u.txt"\n'
+        'top_n = 20\n'
+        'auto_add_to_watchlist = false\n'
+        'auto_watchlist_max = 25\n'
     )
     cfg = AppConfig.load(toml_paths=[toml])
     assert cfg.universe_screener_enabled is False
     assert str(cfg.universe_path) == "/tmp/u.txt"
     assert cfg.universe_top_n == 20
+    assert cfg.universe_auto_add_to_watchlist is False
+    assert cfg.universe_auto_watchlist_max == 25
 
 
 def test_universe_defaults(tmp_path: Path) -> None:
@@ -306,3 +313,5 @@ def test_universe_defaults(tmp_path: Path) -> None:
     cfg = AppConfig.load(toml_paths=[toml])
     assert cfg.universe_screener_enabled is True
     assert cfg.universe_top_n == 10
+    assert cfg.universe_auto_add_to_watchlist is True
+    assert cfg.universe_auto_watchlist_max == 50

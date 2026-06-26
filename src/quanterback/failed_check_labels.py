@@ -125,4 +125,10 @@ def humanize_reject(reason: str, language: str = "en") -> str:
             return "执行错误(无详情)" if language == "zh" else "execution error (no detail)"
         prefix = "执行错误: " if language == "zh" else "execution error: "
         return f"{prefix}{detail[:80]}"
+    if reason.startswith("market_data:"):
+        detail = reason.split(":", 1)[1].strip()
+        if not detail:
+            return "行情数据不可用" if language == "zh" else "market data unavailable"
+        prefix = "行情数据不可用: " if language == "zh" else "market data unavailable: "
+        return f"{prefix}{detail[:80]}"
     return reason

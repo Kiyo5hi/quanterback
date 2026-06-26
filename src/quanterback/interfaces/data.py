@@ -31,6 +31,7 @@ class Summarizer(Protocol):
         analyst_actions: list[AnalystAction] | None = None,
         short_interest: ShortInterestSnapshot | None = None,
         eps_trend: EpsTrend | None = None,
+        allow_short_history: bool = False,
     ) -> CondensedSummary:
         ...
 

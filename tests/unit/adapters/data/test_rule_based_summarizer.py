@@ -4,9 +4,15 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from quanterback.adapters.data.rule_based_summarizer import RuleBasedSummarizer
-from quanterback.domain.market import PriceWindow, TrendRegime, VolatilityRegime
+from quanterback.domain.market import (
+    MarketDataQualityError,
+    PriceWindow,
+    TrendRegime,
+    VolatilityRegime,
+)
 
 
 def _uptrending_window() -> PriceWindow:
@@ -34,6 +40,62 @@ def test_summarize_uptrend() -> None:
 def test_summarize_returns_finite_values() -> None:
     s = RuleBasedSummarizer().summarize(_uptrending_window())
     text = s.to_prompt_text()
+    assert "nan" not in text.lower()
+    assert "inf" not in text.lower()
+
+
+def test_summarize_rejects_zero_atr_data() -> None:
+    idx = pd.date_range(end=datetime(2026, 5, 22, tzinfo=timezone.utc), periods=300, freq="D")
+    closes = [10.0] * 300
+    daily = pd.DataFrame({
+        "open": closes, "high": closes, "low": closes, "close": closes,
+        "volume": [1_000_000] * 300,
+    }, index=idx)
+    hourly = daily.iloc[-30:].copy()
+    pw = PriceWindow(ticker="SPCX", daily=daily, hourly=hourly,
+                     as_of=datetime(2026, 5, 22, tzinfo=timezone.utc))
+
+    with pytest.raises(MarketDataQualityError, match="ATR14"):
+        RuleBasedSummarizer().summarize(pw)
+
+
+def _short_history_window() -> PriceWindow:
+    idx = pd.date_range(end=datetime(2026, 6, 25, tzinfo=timezone.utc), periods=9, freq="B")
+    closes = np.array([24.0, 24.8, 25.2, 24.9, 25.7, 26.2, 27.1, 26.8, 27.4])
+    daily = pd.DataFrame({
+        "open": closes * 0.995,
+        "high": closes * 1.03,
+        "low": closes * 0.97,
+        "close": closes,
+        "volume": np.full(9, 900_000),
+    }, index=idx)
+    hourly_idx = pd.date_range(end=datetime(2026, 6, 25, 20, tzinfo=timezone.utc), periods=40, freq="h")
+    hourly_closes = np.linspace(25.5, 27.4, 40)
+    hourly = pd.DataFrame({
+        "open": hourly_closes * 0.998,
+        "high": hourly_closes * 1.006,
+        "low": hourly_closes * 0.994,
+        "close": hourly_closes,
+        "volume": np.full(40, 80_000),
+    }, index=hourly_idx)
+    return PriceWindow(ticker="SPCX", daily=daily, hourly=hourly,
+                       as_of=datetime(2026, 6, 25, tzinfo=timezone.utc))
+
+
+def test_summarize_rejects_short_history_by_default() -> None:
+    with pytest.raises(MarketDataQualityError, match="ATR14"):
+        RuleBasedSummarizer().summarize(_short_history_window())
+
+
+def test_summarize_allows_short_history_for_preview() -> None:
+    summary = RuleBasedSummarizer().summarize(
+        _short_history_window(), allow_short_history=True,
+    )
+    text = summary.to_prompt_text()
+    assert summary.volatility.atr_14 > 0
+    assert summary.moving_averages.sma_20 > 0
+    assert summary.moving_averages.sma_50 > 0
+    assert summary.moving_averages.sma_200 > 0
     assert "nan" not in text.lower()
     assert "inf" not in text.lower()
 

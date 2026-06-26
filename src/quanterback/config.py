@@ -21,6 +21,13 @@ class AppConfig:
     watchlist_path: Path
     universe_path: Path
     universe_top_n: int
+    universe_screener_enabled: bool
+    universe_auto_add_to_watchlist: bool
+    universe_auto_watchlist_max: int
+    universe_dynamic_top_n: bool
+    universe_top_n_bullish: int
+    universe_top_n_neutral: int
+    universe_top_n_bearish: int
     force_scan_when_closed: bool
 
     # market benchmark — ETF tracking the broad market for trend / RS / B&H
@@ -164,6 +171,13 @@ class AppConfig:
             universe_path=Path(universe.get("path", "/config/universe.txt")),
             benchmark_ticker=str(merged.get("market", {}).get("benchmark_ticker") or "VOO"),
             universe_top_n=int(universe.get("top_n", 10)),
+            universe_screener_enabled=bool(universe.get("enabled", True)),
+            universe_auto_add_to_watchlist=bool(universe.get("auto_add_to_watchlist", True)),
+            universe_auto_watchlist_max=int(universe.get("auto_watchlist_max", 50)),
+            universe_dynamic_top_n=bool(universe.get("dynamic_top_n", False)),
+            universe_top_n_bullish=int(universe.get("top_n_bullish", 15)),
+            universe_top_n_neutral=int(universe.get("top_n_neutral", 10)),
+            universe_top_n_bearish=int(universe.get("top_n_bearish", 5)),
             force_scan_when_closed=bool(scan.get("force_scan_when_closed", False)),
             position_size_pct=float(position.get("position_size_pct", 0.10)),
             max_total_exposure_pct=float(position.get("max_total_exposure_pct", 0.95)),
@@ -204,12 +218,6 @@ class AppConfig:
             position_management_enabled=bool(position_management.get("enabled", False)),
             position_management_min_age_hours=float(position_management.get("min_age_hours", 6.0)),
         )
-        # Set universe dynamic fields on frozen instance using object.__setattr__
-        object.__setattr__(instance, "universe_screener_enabled", bool(universe.get("enabled", True)))
-        object.__setattr__(instance, "universe_top_n_bullish", int(universe.get("top_n_bullish", 15)))
-        object.__setattr__(instance, "universe_top_n_neutral", int(universe.get("top_n_neutral", 10)))
-        object.__setattr__(instance, "universe_top_n_bearish", int(universe.get("top_n_bearish", 5)))
-        object.__setattr__(instance, "universe_dynamic_top_n", bool(universe.get("dynamic_top_n", False)))
         return instance
 
 

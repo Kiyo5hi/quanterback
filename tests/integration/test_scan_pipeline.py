@@ -55,6 +55,43 @@ def _smooth_uptrend_window() -> PriceWindow:
                        as_of=datetime(2026, 5, 22, tzinfo=timezone.utc))
 
 
+def _flat_zero_atr_window() -> PriceWindow:
+    idx = pd.date_range(end=datetime(2026, 5, 22, tzinfo=timezone.utc),
+                        periods=300, freq="B")
+    closes = np.full(300, 10.0)
+    daily = pd.DataFrame({"open": closes, "high": closes,
+                          "low": closes, "close": closes,
+                          "volume": np.full(300, 1_000_000)}, index=idx)
+    hourly = daily.iloc[-30:].copy()
+    return PriceWindow(ticker="SPCX", daily=daily, hourly=hourly,
+                       as_of=datetime(2026, 5, 22, tzinfo=timezone.utc))
+
+
+def _short_history_window() -> PriceWindow:
+    idx = pd.date_range(end=datetime(2026, 6, 25, tzinfo=timezone.utc),
+                        periods=9, freq="B")
+    closes = np.array([24.0, 24.8, 25.2, 24.9, 25.7, 26.2, 27.1, 26.8, 27.4])
+    daily = pd.DataFrame({
+        "open": closes * 0.995,
+        "high": closes * 1.03,
+        "low": closes * 0.97,
+        "close": closes,
+        "volume": np.full(9, 900_000),
+    }, index=idx)
+    hourly_idx = pd.date_range(end=datetime(2026, 6, 25, 20, tzinfo=timezone.utc),
+                               periods=40, freq="h")
+    hourly_closes = np.linspace(25.5, 27.4, 40)
+    hourly = pd.DataFrame({
+        "open": hourly_closes * 0.998,
+        "high": hourly_closes * 1.006,
+        "low": hourly_closes * 0.994,
+        "close": hourly_closes,
+        "volume": np.full(40, 80_000),
+    }, index=hourly_idx)
+    return PriceWindow(ticker="SPCX", daily=daily, hourly=hourly,
+                       as_of=datetime(2026, 6, 25, tzinfo=timezone.utc))
+
+
 def _make_pipeline(
     tmp_path: Path,
     *,
@@ -271,6 +308,61 @@ def test_scenario_8_data_fetch_exception_isolated(tmp_path: Path) -> None:
         "SELECT rejected_reason FROM decisions WHERE rejected_reason IS NOT NULL"
     ).fetchone()
     assert rej and "yfinance down" in rej[0]
+    assert executor.submitted == []
+
+
+def test_market_data_quality_rejected_without_scan_error(tmp_path: Path) -> None:
+    pipeline, store, executor, _ = _make_pipeline(tmp_path, decision=_buy_decision())
+    pipeline.data_provider = FakeDataProvider(_flat_zero_atr_window())
+    pipeline.run_for_tickers(["SPCX"], trigger_label="[DRY] /preview SPCX", force_dry_run=True)
+
+    row = store._conn.execute(
+        "SELECT rejected_reason FROM decisions WHERE rejected_reason IS NOT NULL"
+    ).fetchone()
+    run = store._conn.execute(
+        "SELECT errors_count FROM scan_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+    assert row and row[0].startswith("market_data:")
+    assert "ATR14" in row[0]
+    assert run is not None and run[0] == 0
+    assert executor.submitted == []
+
+
+def test_preview_allows_short_history_without_order(tmp_path: Path) -> None:
+    pipeline, store, executor, _ = _make_pipeline(tmp_path, decision=_buy_decision())
+    pipeline.data_provider = FakeDataProvider(_short_history_window())
+
+    pipeline.run_for_tickers(["SPCX"], trigger_label="[DRY] /preview SPCX", force_dry_run=True)
+
+    row = store._conn.execute(
+        "SELECT summary_json, rejected_reason FROM decisions WHERE ticker='SPCX'"
+    ).fetchone()
+    run = store._conn.execute(
+        "SELECT errors_count FROM scan_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+    assert row is not None
+    assert row[0]
+    assert row[1] is None
+    assert run is not None and run[0] == 0
+    assert executor.submitted == []
+
+
+def test_frozen_dry_run_rejects_short_history(tmp_path: Path) -> None:
+    pipeline, store, executor, _ = _make_pipeline(
+        tmp_path, decision=_buy_decision(), mode="frozen",
+    )
+    pipeline.data_provider = FakeDataProvider(_short_history_window())
+
+    pipeline.run_for_tickers(["SPCX"], trigger_label="/scan SPCX", force_dry_run=False)
+
+    row = store._conn.execute(
+        "SELECT rejected_reason FROM decisions WHERE ticker='SPCX'"
+    ).fetchone()
+
+    assert row and row[0].startswith("market_data:")
+    assert "ATR14" in row[0]
     assert executor.submitted == []
 
 

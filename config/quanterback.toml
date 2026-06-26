@@ -14,6 +14,10 @@ benchmark_ticker = "VOO"
 enabled = true
 path = "/config/universe.txt"
 top_n = 10
+# Persist screener picks into DB watchlist as source="auto" so active names
+# stay in the recurring candidate pool instead of only being scanned once.
+auto_add_to_watchlist = true
+auto_watchlist_max = 50
 # Dynamic top_n based on SPY regime (bullish/neutral/bearish)
 dynamic_top_n = false
 top_n_bullish = 15

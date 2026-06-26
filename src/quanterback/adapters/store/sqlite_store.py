@@ -447,6 +447,25 @@ class SqliteStore:
             "UPDATE watchlist SET source=? WHERE ticker=?", (source, ticker)
         )
 
+    def prune_auto_watchlist(self, max_entries: int) -> int:
+        """Keep only the newest max_entries auto-selected watchlist rows."""
+        if max_entries <= 0:
+            return 0
+        cur = self._conn.execute(
+            """
+            DELETE FROM watchlist
+            WHERE source = 'auto'
+              AND ticker NOT IN (
+                SELECT ticker FROM watchlist
+                WHERE source = 'auto'
+                ORDER BY added_at DESC, ticker ASC
+                LIMIT ?
+              )
+            """,
+            (max_entries,),
+        )
+        return int(cur.rowcount or 0)
+
     # --- position management decisions ---
     def insert_position_management_decision(
         self,
