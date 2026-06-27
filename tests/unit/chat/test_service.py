@@ -8,7 +8,14 @@ from quanterback.chat.models import ChatRequest
 from quanterback.chat.service import ResearchChatService
 from quanterback.interfaces.decision import ChatMessage, ChatResponse
 from quanterback.tools.capabilities import CapabilitySelection, build_research_catalog
-from quanterback.tools.registry import ToolResult
+from quanterback.tools.registry import (
+    Tool,
+    ToolContext,
+    ToolManifest,
+    ToolRegistry,
+    ToolResult,
+    ToolSideEffect,
+)
 
 
 def _request(text: str) -> ChatRequest:
@@ -200,3 +207,47 @@ def test_chat_service_formats_analysis_result(tmp_path) -> None:
     assert "结论: PASS    置信度" not in reply.text
     assert "这是研究结论" not in reply.text
     assert "MU — PASS" not in reply.text
+
+
+def test_chat_service_runs_multiple_ticker_analyses_from_one_message(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    calls: list[str] = []
+
+    def analyze(params: dict, _context: ToolContext) -> ToolResult:
+        ticker = str(params["ticker"])
+        calls.append(ticker)
+        return ToolResult(
+            ok=True,
+            data={
+                "ticker": ticker,
+                "action": "PASS",
+                "rationale": f"{ticker} rationale",
+                "summary": {},
+                "decision": {},
+            },
+        )
+
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=analyze,
+        ),
+    ])
+    service = ResearchChatService(store=store, registry=registry)
+
+    reply = service.handle(_request("分别分析 tsla 和 spcx"))
+
+    assert calls == ["TSLA", "SPCX"]
+    assert "TSLA 研究结果" in reply.text
+    assert "SPCX 研究结果" in reply.text
+    assert "---" in reply.text

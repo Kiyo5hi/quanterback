@@ -11,6 +11,7 @@ from quanterback.capabilities.research import ResearchAnalyzer
 from quanterback.domain.market import MarketDataQualityError
 from quanterback.domain.research import ResearchAuditEvent
 from quanterback.interfaces.research_store import ResearchStore
+from quanterback.tickers import canonical_ticker
 from quanterback.tools.registry import (
     Tool,
     ToolContext,
@@ -21,17 +22,6 @@ from quanterback.tools.registry import (
 
 log = logging.getLogger(__name__)
 _ANALYZE_LOCK = threading.Lock()
-
-_TICKER_ALIASES = {
-    "NVIDIA": "NVDA",
-    "NVIDIA CORP": "NVDA",
-    "NVIDIA CORPORATION": "NVDA",
-    "NVDA.O": "NVDA",
-    "SOX": "SOXX",
-    "PHLX SOX": "SOXX",
-    "PHILADELPHIA SEMICONDUCTOR INDEX": "SOXX",
-}
-
 
 def _context_user_id(context: ToolContext) -> int | None:
     if context.user_id is None:
@@ -160,10 +150,7 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
 
 
 def _canonical_ticker(raw: str) -> str:
-    ticker = raw.strip().upper()
-    ticker = ticker.replace("$", "")
-    ticker = _TICKER_ALIASES.get(ticker, ticker)
-    return ticker
+    return canonical_ticker(raw)
 
 
 def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 420.0):
@@ -238,7 +225,11 @@ def watchlist_remove_tool(store: ResearchStore) -> Tool:
         )
         return ToolResult(
             ok=True,
-            message=f"{ticker} removed from watchlist" if removed else f"{ticker} was not in watchlist",
+            message=(
+                f"{ticker} removed from watchlist"
+                if removed
+                else f"{ticker} was not in watchlist"
+            ),
             data={"ticker": ticker, "removed": removed},
         )
 
@@ -385,7 +376,11 @@ def cancel_digest_tool(store: ResearchStore) -> Tool:
         )
         return ToolResult(
             ok=True,
-            message=f"digest job cancelled: {job_id}" if cancelled else f"digest job not found: {job_id}",
+            message=(
+                f"digest job cancelled: {job_id}"
+                if cancelled
+                else f"digest job not found: {job_id}"
+            ),
             data={"job_id": job_id, "cancelled": cancelled},
         )
 

@@ -7,6 +7,7 @@ from quanterback.chat.intent import LLMIntentResolver
 from quanterback.chat.models import ChatIntent, ChatReply, ChatRequest
 from quanterback.chat.router import ResearchChatRouter
 from quanterback.interfaces.research_store import ResearchStore
+from quanterback.tickers import extract_tickers
 from quanterback.tools.registry import ToolContext, ToolRegistry, ToolResult
 
 log = logging.getLogger(__name__)
@@ -42,7 +43,11 @@ class ResearchChatService:
             locale=self.language,
         )
         assert user.id is not None
-        key = self._pending_key(request.provider, request.external_user_id, request.external_chat_id)
+        key = self._pending_key(
+            request.provider,
+            request.external_user_id,
+            request.external_chat_id,
+        )
         intent = self.router.route(request.text)
         context = self._tool_context(user.id)
         if intent.kind == "unknown" and not request.text.strip().startswith("/"):
@@ -79,6 +84,12 @@ class ResearchChatService:
             return ChatReply(text=self.help_text())
         if intent.kind != "tool" or not intent.tool_name:
             return ChatReply(text=self.unknown_text(request.text), ok=False)
+
+        if intent.tool_name == "research.analyze_ticker":
+            tickers = extract_tickers(request.text)
+            if len(tickers) > 1:
+                reply = self._execute_many_analyses(tickers, user_id=user.id)
+                return reply
 
         reply = self._execute(intent.tool_name, intent.params, user_id=user.id, confirmed=False)
         if reply.confirmation_required:
@@ -118,7 +129,11 @@ class ResearchChatService:
                 text=f"这个部署没有启用工具: {tool_name}",
             )
         except Exception as exc:
-            log.exception("Tool execution failed: tool=%s params=%s", tool_name, _redact_params(params))
+            log.exception(
+                "Tool execution failed: tool=%s params=%s",
+                tool_name,
+                _redact_params(params),
+            )
             return ChatReply(
                 ok=False,
                 text=(
@@ -129,6 +144,20 @@ class ResearchChatService:
                 ),
             )
         return self._render_result(result)
+
+    def _execute_many_analyses(self, tickers: list[str], *, user_id: int) -> ChatReply:
+        rendered: list[str] = []
+        ok = True
+        for ticker in tickers:
+            reply = self._execute(
+                "research.analyze_ticker",
+                {"ticker": ticker},
+                user_id=user_id,
+                confirmed=False,
+            )
+            ok = ok and reply.ok
+            rendered.append(reply.text)
+        return ChatReply(ok=ok, text="\n\n---\n\n".join(rendered))
 
     def _render_result(self, result: ToolResult) -> ChatReply:
         if result.data.get("confirmation_required"):
@@ -171,6 +200,8 @@ class ResearchChatService:
         ]
         if "research.analyze_ticker" in tool_names:
             lines.append("- `帮我分析一下 NVDA`：看价格、新闻、基本面和模型判断")
+            lines.append("- `分析小米` 或 `分析 1810.HK`：港股按 Yahoo ticker 格式处理")
+            lines.append("- `分别分析 TSLA 和 SPCX`：逐只研究后合并回复")
         if "research.watchlist_add" in tool_names:
             lines.append("- `帮我关注 SOXX`：加入你的个人自选")
         if "research.watchlist_list" in tool_names:
@@ -235,6 +266,10 @@ def _looks_like_capability_question(text: str) -> bool:
             "介绍一下",
             "怎么玩",
             "使用说明",
+            "支持什么",
+            "支持哪些",
+            "能看",
+            "港股",
         )
     )
 
@@ -260,7 +295,10 @@ def _looks_like_local_reply(text: str) -> bool:
 def _friendly_error(exc: Exception) -> str:
     message = str(exc).strip()
     if "last close unavailable" in message or "bad price data" in message:
-        return "行情源没有拿到可用的最新收盘价，可能是 ticker 不对、数据源暂时缺数据，或这个标的不适合当前分析流程。"
+        return (
+            "行情源没有拿到可用的最新收盘价，可能是 ticker 不对、"
+            "数据源暂时缺数据，或这个标的不适合当前分析流程。"
+        )
     if "ticker is required" in message:
         return "我没有识别到股票代码。"
     return message[:220] or exc.__class__.__name__

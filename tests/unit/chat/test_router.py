@@ -7,6 +7,7 @@ def test_router_maps_slash_commands_to_tools() -> None:
     r = ResearchChatRouter()
 
     assert r.route("/analyze nvda").tool_name == "research.analyze_ticker"
+    assert r.route("/analyze 700.hk").params["ticker"] == "0700.HK"
     assert r.route("/add nvda").tool_name == "research.watchlist_add"
     assert r.route("/remove nvda").tool_name == "research.watchlist_remove"
     assert r.route("/watchlist").tool_name == "research.watchlist_list"

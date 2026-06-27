@@ -1,46 +1,9 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from quanterback.chat.models import ChatIntent
-
-_TICKER_RE = re.compile(r"\$?([A-Za-z][A-Za-z0-9.\-]{0,9})")
-
-_TICKER_STOPWORDS = {
-    "A",
-    "ADD",
-    "ANALYSE",
-    "ANALYZE",
-    "AND",
-    "ASK",
-    "CANCEL",
-    "DELETE",
-    "DIGEST",
-    "ETF",
-    "FROM",
-    "HELP",
-    "I",
-    "IN",
-    "JOB",
-    "JOBS",
-    "LIST",
-    "ME",
-    "MY",
-    "NO",
-    "OR",
-    "PLEASE",
-    "REMOVE",
-    "REPORT",
-    "SHOW",
-    "THE",
-    "TICKER",
-    "TO",
-    "UNWATCH",
-    "WATCH",
-    "WATCHLIST",
-    "YES",
-}
+from quanterback.tickers import canonical_ticker, extract_tickers
 
 
 @dataclass
@@ -84,19 +47,19 @@ class ResearchChatRouter:
             return ChatIntent(
                 kind="tool",
                 tool_name="research.analyze_ticker",
-                params={"ticker": args[0].upper()},
+                params={"ticker": canonical_ticker(args[0])},
             )
         if head in {"/add", "/watch"} and args:
             return ChatIntent(
                 kind="tool",
                 tool_name="research.watchlist_add",
-                params={"ticker": args[0].upper()},
+                params={"ticker": canonical_ticker(args[0])},
             )
         if head in {"/remove", "/rm", "/unwatch"} and args:
             return ChatIntent(
                 kind="tool",
                 tool_name="research.watchlist_remove",
-                params={"ticker": args[0].upper()},
+                params={"ticker": canonical_ticker(args[0])},
             )
         if head in {"/watchlist", "/list"}:
             return ChatIntent(kind="tool", tool_name="research.watchlist_list")
@@ -130,13 +93,13 @@ class ResearchChatRouter:
             return ChatIntent(
                 kind="tool",
                 tool_name="trading.scan_tickers",
-                params={"tickers": [a.upper() for a in args]},
+                params={"tickers": [canonical_ticker(a) for a in args]},
             )
         if head in {"/preview"}:
             return ChatIntent(
                 kind="tool",
                 tool_name="trading.preview_tickers",
-                params={"tickers": [a.upper() for a in args]},
+                params={"tickers": [canonical_ticker(a) for a in args]},
             )
         if head in {"/rescan"}:
             return ChatIntent(kind="tool", tool_name="trading.rescan_watchlist")
@@ -147,31 +110,32 @@ class ResearchChatRouter:
                 return ChatIntent(
                     kind="tool",
                     tool_name="trading.watchlist_add",
-                    params={"ticker": args[1].upper()},
+                    params={"ticker": canonical_ticker(args[1])},
                 )
             if args[0].lower() == "remove" and len(args) >= 2:
                 return ChatIntent(
                     kind="tool",
                     tool_name="trading.watchlist_remove",
-                    params={"ticker": args[1].upper()},
+                    params={"ticker": canonical_ticker(args[1])},
                 )
         if head in {"/add"} and args:
             return ChatIntent(
                 kind="tool",
                 tool_name="trading.watchlist_add",
-                params={"ticker": args[0].upper()},
+                params={"ticker": canonical_ticker(args[0])},
             )
         if head in {"/remove"} and args:
             return ChatIntent(
                 kind="tool",
                 tool_name="trading.watchlist_remove",
-                params={"ticker": args[0].upper()},
+                params={"ticker": canonical_ticker(args[0])},
             )
         return None
 
     def _route_natural(self, raw: str) -> ChatIntent:
         lowered = raw.lower()
-        ticker = _extract_ticker(raw)
+        tickers = extract_tickers(raw)
+        ticker = tickers[0] if tickers else None
         if self.enable_trading_commands:
             routed = self._route_trading_natural(raw, lowered, ticker)
             if routed is not None:
@@ -262,12 +226,8 @@ class ResearchChatRouter:
 
 
 def _extract_ticker(text: str) -> str | None:
-    for match in _TICKER_RE.finditer(text):
-        token = match.group(1).upper()
-        if token in _TICKER_STOPWORDS:
-            continue
-        return token
-    return None
+    tickers = extract_tickers(text)
+    return tickers[0] if tickers else None
 
 
 def _has_any(text: str, needles: tuple[str, ...]) -> bool:
