@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
 from typing import Any
@@ -19,6 +20,7 @@ from quanterback.tools.registry import (
 )
 
 log = logging.getLogger(__name__)
+_ANALYZE_LOCK = threading.Lock()
 
 _TICKER_ALIASES = {
     "NVIDIA": "NVDA",
@@ -80,7 +82,10 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
             return ToolResult(ok=False, message="ticker is required")
         log.info("Research analyze started ticker=%s user=%s", ticker, context.user_id)
         try:
-            result = _analyze_with_timeout(analyzer, ticker)
+            log.info("Research analyze waiting for slot ticker=%s", ticker)
+            with _ANALYZE_LOCK:
+                log.info("Research analyze acquired slot ticker=%s", ticker)
+                result = _analyze_with_timeout(analyzer, ticker)
         except MarketDataQualityError as exc:
             log.info("Research analyze rejected ticker=%s reason=market_data_quality", ticker)
             return ToolResult(
@@ -97,8 +102,8 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
                 ok=False,
                 message=(
                     f"我开始分析 {ticker} 了，但这次研究流程超时了。"
-                    "通常是行情源或模型响应太慢。你可以稍后再试，"
-                    "或者先把它加入自选让我之后做日报。"
+                    "这通常是模型服务响应太慢。当前部署会串行处理多专家分析，"
+                    "你可以稍后重试，或先减少连续提交的分析请求。"
                 ),
                 data={"ticker": ticker, "error_type": "timeout"},
             )
@@ -160,7 +165,7 @@ def _canonical_ticker(raw: str) -> str:
     return ticker
 
 
-def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 90.0):
+def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 240.0):
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         future = pool.submit(analyzer.analyze_ticker, ticker)

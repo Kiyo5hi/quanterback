@@ -34,9 +34,10 @@ class ArkClient:
         timeout: float = 45.0,
         thinking_effort: str = "off",
     ) -> None:
-        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
         self._max_tokens = max_tokens
+        self._timeout = timeout
         self._thinking_effort = thinking_effort
         self._use_tools: bool | None = None
         self._use_named_tools: bool | None = None
@@ -60,6 +61,7 @@ class ArkClient:
             "messages": oai_messages,
             "temperature": temperature,
             "max_tokens": self._max_tokens,
+            "timeout": self._timeout,
         }
         extra_body = self._build_extra_body()
         if extra_body is not None:
@@ -156,6 +158,7 @@ class ArkClient:
             "messages": oai_messages,
             "temperature": temperature,
             "max_tokens": self._max_tokens,
+            "timeout": self._timeout,
             "tools": [
                 {
                     "type": "function",
