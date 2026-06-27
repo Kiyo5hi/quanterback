@@ -102,10 +102,20 @@ def test_chat_service_help_is_human_readable(tmp_path) -> None:
 
     reply = service.handle(_request("你能干嘛"))
 
-    assert reply.ok is False
+    assert reply.ok is True
     assert "QuanterChat" in reply.text
     assert "research.watchlist_add" not in reply.text
     assert "帮我关注" in reply.text
+
+
+def test_chat_service_greeting_is_local_and_human_readable(tmp_path) -> None:
+    service, _store = _service(tmp_path)
+
+    reply = service.handle(_request("你好"))
+
+    assert reply.ok is True
+    assert "QuanterChat" in reply.text
+    assert "分析 NVDA" in reply.text
 
 
 def test_chat_service_unknown_reply_gives_next_steps(tmp_path) -> None:

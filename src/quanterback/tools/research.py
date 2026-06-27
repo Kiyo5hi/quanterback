@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +17,18 @@ from quanterback.tools.registry import (
     ToolResult,
     ToolSideEffect,
 )
+
+log = logging.getLogger(__name__)
+
+_TICKER_ALIASES = {
+    "NVIDIA": "NVDA",
+    "NVIDIA CORP": "NVDA",
+    "NVIDIA CORPORATION": "NVDA",
+    "NVDA.O": "NVDA",
+    "SOX": "SOXX",
+    "PHLX SOX": "SOXX",
+    "PHILADELPHIA SEMICONDUCTOR INDEX": "SOXX",
+}
 
 
 def _context_user_id(context: ToolContext) -> int | None:
@@ -61,12 +75,14 @@ def _audit(
 
 def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
     def _handle(params: dict[str, Any], context: ToolContext) -> ToolResult:
-        ticker = str(params.get("ticker") or "").strip().upper()
+        ticker = _canonical_ticker(str(params.get("ticker") or ""))
         if not ticker:
             return ToolResult(ok=False, message="ticker is required")
+        log.info("Research analyze started ticker=%s user=%s", ticker, context.user_id)
         try:
-            result = analyzer.analyze_ticker(ticker)
+            result = _analyze_with_timeout(analyzer, ticker)
         except MarketDataQualityError as exc:
+            log.info("Research analyze rejected ticker=%s reason=market_data_quality", ticker)
             return ToolResult(
                 ok=False,
                 message=(
@@ -75,8 +91,23 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
                 ),
                 data={"ticker": ticker, "error": str(exc), "error_type": "market_data_quality"},
             )
+        except TimeoutError:
+            log.warning("Research analyze timed out ticker=%s", ticker)
+            return ToolResult(
+                ok=False,
+                message=(
+                    f"我开始分析 {ticker} 了，但这次研究流程超时了。"
+                    "通常是行情源或模型响应太慢。你可以稍后再试，"
+                    "或者先把它加入自选让我之后做日报。"
+                ),
+                data={"ticker": ticker, "error_type": "timeout"},
+            )
         decision = result.decision
         summary = result.summary
+        log.info(
+            "Research analyze completed ticker=%s action=%s confidence=%.2f",
+            ticker, decision.action, decision.confidence,
+        )
         return ToolResult(
             ok=True,
             message=decision.rationale,
@@ -120,6 +151,22 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
         ),
         handler=_handle,
     )
+
+
+def _canonical_ticker(raw: str) -> str:
+    ticker = raw.strip().upper()
+    ticker = ticker.replace("$", "")
+    ticker = _TICKER_ALIASES.get(ticker, ticker)
+    return ticker
+
+
+def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 90.0):
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(analyzer.analyze_ticker, ticker)
+        return future.result(timeout=timeout_s)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def watchlist_add_tool(store: ResearchStore) -> Tool:

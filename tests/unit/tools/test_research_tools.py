@@ -89,6 +89,25 @@ def test_analyze_ticker_tool_requires_setup_and_allowed_interface() -> None:
     assert analyzer.last_ticker == "NVDA"
 
 
+def test_analyze_ticker_tool_canonicalizes_common_names() -> None:
+    analyzer = FakeAnalyzer()
+    tool = analyze_ticker_tool(analyzer)  # type: ignore[arg-type]
+
+    nvidia = tool.execute(
+        {"ticker": "Nvidia"},
+        ToolContext(interface="research_chat", setup=frozenset({"llm", "market_data"})),
+    )
+    assert nvidia.ok is True
+    assert analyzer.last_ticker == "NVDA"
+
+    sox = tool.execute(
+        {"ticker": "SOX"},
+        ToolContext(interface="research_chat", setup=frozenset({"llm", "market_data"})),
+    )
+    assert sox.ok is True
+    assert analyzer.last_ticker == "SOXX"
+
+
 def test_analyze_ticker_tool_returns_friendly_data_quality_error() -> None:
     tool = analyze_ticker_tool(BadDataAnalyzer())  # type: ignore[arg-type]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -33,6 +34,8 @@ class TelegramResearchBot:
         self._max_iterations = max_iterations
         self._get_updates = f"https://api.telegram.org/bot{token}/getUpdates"
         self._send_message = f"https://api.telegram.org/bot{token}/sendMessage"
+        self._send_chat_action = f"https://api.telegram.org/bot{token}/sendChatAction"
+        self._edit_message = f"https://api.telegram.org/bot{token}/editMessageText"
 
     def listen(self) -> None:
         for request in self._updates():
@@ -43,12 +46,34 @@ class TelegramResearchBot:
             self._executor.submit(self._handle_one, request)
 
     def _handle_one(self, request: ChatRequest) -> None:
+        done = threading.Event()
+        status = _ProcessingStatus()
+        action_thread = threading.Thread(
+            target=self._keep_typing,
+            args=(request, done),
+            name="telegram-typing",
+            daemon=True,
+        )
+        action_thread.start()
+        status.message_id = self._send_status(
+            request,
+            "收到，我正在处理这条消息。",
+        )
         try:
             reply = self._service.handle(request)
-            self._reply(request, reply.text)
+            done.set()
+            if status.message_id is not None:
+                self._edit(request, status.message_id, reply.text)
+            else:
+                self._reply(request, reply.text)
         except Exception as exc:
+            done.set()
             log.exception("Research chat request failed: %s", exc)
-            self._reply(request, f"处理失败: {str(exc)[:300]}")
+            text = f"处理失败: {str(exc)[:300]}"
+            if status.message_id is not None:
+                self._edit(request, status.message_id, text)
+            else:
+                self._reply(request, text)
 
     def _updates(self) -> Iterable[ChatRequest]:
         iters = 0
@@ -125,6 +150,61 @@ class TelegramResearchBot:
             except Exception as exc:
                 log.warning("Research reply exception: %s", exc)
 
+    def _send_status(self, request: ChatRequest, text: str) -> int | None:
+        payload = {
+            "chat_id": request.external_chat_id,
+            "text": text,
+            "reply_to_message_id": request.message_id,
+            "allow_sending_without_reply": True,
+        }
+        try:
+            resp = requests.post(self._send_message, json=payload, timeout=10)
+            if not resp.ok:
+                log.warning("Research status message failed %d: %s",
+                            resp.status_code, resp.text[:200])
+                return None
+            body = resp.json()
+            result = body.get("result") if isinstance(body, dict) else None
+            if isinstance(result, dict):
+                message_id = result.get("message_id")
+                return int(message_id) if message_id is not None else None
+        except Exception as exc:
+            log.warning("Research status message exception: %s", exc)
+        return None
+
+    def _edit(self, request: ChatRequest, message_id: int, text: str) -> None:
+        chunks = _split_for_tg(text)
+        first, rest = chunks[0], chunks[1:]
+        payload = {
+            "chat_id": request.external_chat_id,
+            "message_id": message_id,
+            "text": first,
+            "parse_mode": "Markdown",
+        }
+        try:
+            resp = requests.post(self._edit_message, json=payload, timeout=10)
+            if not resp.ok:
+                log.warning("Research edit failed %d: %s; retrying plain",
+                            resp.status_code, resp.text[:200])
+                payload.pop("parse_mode", None)
+                requests.post(self._edit_message, json=payload, timeout=10)
+        except Exception as exc:
+            log.warning("Research edit exception: %s", exc)
+            self._reply(request, first)
+        for chunk in rest:
+            self._reply(request, chunk)
+
+    def _keep_typing(self, request: ChatRequest, done: threading.Event) -> None:
+        while not done.is_set():
+            payload = {
+                "chat_id": request.external_chat_id,
+                "action": "typing",
+            }
+            try:
+                requests.post(self._send_chat_action, json=payload, timeout=5)
+            except Exception as exc:
+                log.debug("Research chat action failed: %s", exc)
+            done.wait(4)
 
 def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if len(text) <= limit:
@@ -140,3 +220,7 @@ def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if cur:
         out.append(cur)
     return out
+
+
+class _ProcessingStatus:
+    message_id: int | None = None

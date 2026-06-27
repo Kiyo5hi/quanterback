@@ -46,6 +46,14 @@ class ResearchChatService:
         intent = self.router.route(request.text)
         context = self._tool_context(user.id)
         if intent.kind == "unknown" and not request.text.strip().startswith("/"):
+            if _looks_like_local_reply(request.text):
+                log.info(
+                    "Chat routed interface=%s user=%s kind=local tool=None params={} text=%r",
+                    self.interface,
+                    request.external_user_id,
+                    request.text[:160],
+                )
+                return ChatReply(text=self.unknown_text(request.text), ok=True)
             intent = self._resolve_natural_intent(request.text, context)
         log.info(
             "Chat routed interface=%s user=%s kind=%s tool=%s params=%s text=%r",
@@ -181,6 +189,18 @@ class ResearchChatService:
         return "\n".join(lines)
 
     def unknown_text(self, text: str) -> str:
+        if _looks_like_greeting(text):
+            if self.interface == "trader_bot":
+                return (
+                    "你好，我是 QuanterBack 的私有控制 bot。\n\n"
+                    "我可以帮你看交易状态、preview 某只股票、管理 trader watchlist。"
+                    "你可以直接说：`看状态` 或 `preview NVDA`。"
+                )
+            return (
+                "你好，我是 QuanterChat，主要帮你做美股研究和个人自选管理。\n\n"
+                "你可以直接说：`分析 NVDA`、`把 SOXX 加到自选`，"
+                "或者问 `我的自选有哪些`。"
+            )
         if _looks_like_capability_question(text):
             return self.help_text()
         if self.interface == "trader_bot":
@@ -221,6 +241,24 @@ def _looks_like_capability_question(text: str) -> bool:
             "使用说明",
         )
     )
+
+
+def _looks_like_greeting(text: str) -> bool:
+    normalized = text.lower().strip(" \t\r\n.!?。！？～~")
+    return normalized in {
+        "hi",
+        "hello",
+        "hey",
+        "你好",
+        "您好",
+        "嗨",
+        "在吗",
+        "在不在",
+    }
+
+
+def _looks_like_local_reply(text: str) -> bool:
+    return _looks_like_greeting(text) or _looks_like_capability_question(text)
 
 
 def _friendly_error(exc: Exception) -> str:
