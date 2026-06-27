@@ -30,6 +30,54 @@ def test_fetch_returns_price_window(provider: YFinanceProvider) -> None:
     assert "close" in pw.daily.columns  # lowercased
 
 
+def test_normalize_drops_incomplete_price_rows() -> None:
+    raw = pd.DataFrame({
+        "Open": [10.0, None],
+        "High": [11.0, None],
+        "Low": [9.0, None],
+        "Close": [10.5, None],
+        "Volume": [1000, 2000],
+    })
+
+    out = YFinanceProvider._normalize(raw)
+
+    assert len(out) == 1
+    assert out["close"].iloc[-1] == 10.5
+
+
+def test_bad_price_cache_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(tz=timezone.utc)
+    bad = pd.DataFrame({
+        "open": [10.0, None],
+        "high": [11.0, None],
+        "low": [9.0, None],
+        "close": [10.5, None],
+        "volume": [1000, 2000],
+    })
+    bad.to_parquet(tmp_path / f"AAPL_daily_{now.strftime('%Y%m%d')}.parquet")
+    good_daily = make_daily_df()
+    good_hourly = make_hourly_df()
+    stub = StubTicker(good_daily, good_hourly)
+    calls = {"n": 0}
+
+    def ticker(symbol: str):
+        calls["n"] += 1
+        return stub
+
+    monkeypatch.setattr(
+        "quanterback.adapters.data.yfinance_provider.yf.Ticker",
+        ticker,
+    )
+    provider = YFinanceProvider(cache_dir=tmp_path, cache_ttl_hours=4)
+
+    pw = provider.fetch("AAPL")
+
+    assert calls["n"] == 1
+    assert pw.daily["close"].notna().all()
+
+
 def test_fetch_writes_parquet_cache(provider: YFinanceProvider, tmp_path: Path) -> None:
     provider.fetch("AAPL")
     files = list(tmp_path.glob("AAPL_*.parquet"))

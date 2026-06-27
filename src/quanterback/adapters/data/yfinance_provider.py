@@ -53,7 +53,11 @@ class YFinanceProvider:
     @staticmethod
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
         out = df.rename(columns={c: c.lower() for c in df.columns})
-        return out[["open", "high", "low", "close", "volume"]].copy()
+        out = out[["open", "high", "low", "close", "volume"]].copy()
+        required = ["open", "high", "low", "close"]
+        out = out.dropna(subset=required)
+        out = out[out["close"] > 0]
+        return out
 
     def _cache_path(self, ticker: str, kind: str, now: datetime) -> Path:
         day = now.strftime("%Y%m%d")
@@ -66,10 +70,27 @@ class YFinanceProvider:
         age = now - datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
         if age > self._ttl:
             return None
-        return pd.read_parquet(path)
+        df = pd.read_parquet(path)
+        if self._has_bad_price_rows(df):
+            log.warning("Ignoring bad %s cache for %s: %s", kind, ticker, path)
+            return None
+        return df
 
     def _write_cache(self, ticker: str, kind: str, df: pd.DataFrame, now: datetime) -> None:
+        if df.empty or self._has_bad_price_rows(df):
+            log.warning("Skipping bad %s cache write for %s", kind, ticker)
+            return
         df.to_parquet(self._cache_path(ticker, kind, now))
+
+    @staticmethod
+    def _has_bad_price_rows(df: pd.DataFrame) -> bool:
+        required = {"open", "high", "low", "close"}
+        if not required.issubset(df.columns):
+            return True
+        if df.empty:
+            return True
+        prices = df[list(required)]
+        return bool(prices.isna().any().any() or (df["close"] <= 0).any())
 
     def fetch_historical(self, ticker: str, years: int) -> pd.DataFrame:
         ticker = ticker.upper()
