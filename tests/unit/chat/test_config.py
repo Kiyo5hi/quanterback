@@ -15,6 +15,7 @@ def test_research_chat_config_does_not_require_alpaca(tmp_path: Path) -> None:
         "[telegram]\n"
         'research_bot_token = "tg-research"\n'
         'research_chat_ids = ["1"]\n'
+        'research_allowed_user_ids = ["u1"]\n'
         "[capabilities]\n"
         'enabled = ["research.watchlist"]\n'
         "[storage]\n"
@@ -25,7 +26,7 @@ def test_research_chat_config_does_not_require_alpaca(tmp_path: Path) -> None:
 
     assert cfg.tg_token == "tg-research"
     assert cfg.tg_allowed_chat_ids == ("1",)
+    assert cfg.tg_allowed_user_ids == ("u1",)
     assert cfg.ark_api_key == "ark-x"
     assert cfg.capabilities.enabled == ("research.watchlist",)
     assert str(cfg.db_path) == "/tmp/research.sqlite"
-

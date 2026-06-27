@@ -13,6 +13,7 @@ from quanterback.tools.capabilities import CapabilitySelection
 class ResearchChatConfig:
     tg_token: str
     tg_allowed_chat_ids: tuple[str, ...]
+    tg_allowed_user_ids: tuple[str, ...]
     llm_provider: Literal["claude", "ark"]
     anthropic_key: str
     ark_api_key: str | None
@@ -67,6 +68,9 @@ class ResearchChatConfig:
             tg_allowed_chat_ids=tuple(
                 str(c) for c in telegram.get("research_chat_ids", telegram.get("chat_ids", []))
             ),
+            tg_allowed_user_ids=tuple(
+                str(u) for u in telegram.get("research_allowed_user_ids", [])
+            ),
             llm_provider=provider,
             anthropic_key=anthropic_key,
             ark_api_key=ark_api_key,
@@ -82,4 +86,3 @@ class ResearchChatConfig:
             display_timezone=str(i18n.get("timezone") or "America/Los_Angeles"),
             capabilities=CapabilitySelection.from_toml(merged),
         )
-

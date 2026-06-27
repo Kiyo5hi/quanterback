@@ -100,6 +100,7 @@ cache_ttl_hours = 4
 [telegram]
 chat_ids = []
 research_chat_ids = []
+research_allowed_user_ids = []
 retry_window_hours = 1
 # bot_token = ""    # set in local.toml or TELEGRAM_BOT_TOKEN env
 # research_bot_token = ""  # optional separate token for `quanterback chat-bot`

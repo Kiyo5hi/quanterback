@@ -861,6 +861,7 @@ def cmd_chat_bot(_args: argparse.Namespace) -> int:
         token=config.tg_token,
         service=service,
         allowed_chat_ids=config.tg_allowed_chat_ids,
+        allowed_user_ids=config.tg_allowed_user_ids,
     ).listen()
     return 0
 

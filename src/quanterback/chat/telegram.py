@@ -21,6 +21,7 @@ class TelegramResearchBot:
         token: str,
         service: ResearchChatService,
         allowed_chat_ids: tuple[str, ...] = (),
+        allowed_user_ids: tuple[str, ...] = (),
         poll_timeout: int = 25,
         max_workers: int = 8,
         max_iterations: int | None = None,
@@ -28,6 +29,7 @@ class TelegramResearchBot:
         self._token = token
         self._service = service
         self._allowed_chat_ids = set(allowed_chat_ids)
+        self._allowed_user_ids = set(allowed_user_ids)
         self._poll_timeout = poll_timeout
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="chat")
         self._last_update_id = 0
@@ -39,11 +41,26 @@ class TelegramResearchBot:
 
     def listen(self) -> None:
         for request in self._updates():
-            if self._allowed_chat_ids and request.external_chat_id not in self._allowed_chat_ids:
-                log.info("Ignoring research chat message from unauthorized chat %s",
-                         request.external_chat_id)
+            if not self._is_authorized(request):
                 continue
             self._executor.submit(self._handle_one, request)
+
+    def _is_authorized(self, request: ChatRequest) -> bool:
+        if self._allowed_user_ids and request.external_user_id not in self._allowed_user_ids:
+            log.info(
+                "Ignoring research chat message from unauthorized user %s chat %s",
+                request.external_user_id,
+                request.external_chat_id,
+            )
+            return False
+        if self._allowed_chat_ids and request.external_chat_id not in self._allowed_chat_ids:
+            log.info(
+                "Ignoring research chat message from unauthorized chat %s user %s",
+                request.external_chat_id,
+                request.external_user_id,
+            )
+            return False
+        return True
 
     def _handle_one(self, request: ChatRequest) -> None:
         done = threading.Event()
