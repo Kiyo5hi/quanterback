@@ -57,6 +57,7 @@ class RuleBasedSummarizer:
     ) -> CondensedSummary:
         daily = w.daily
         hourly = w.hourly
+        self._validate_price_frame(daily)
         closes = daily["close"]
 
         price = self._price_snapshot(closes)
@@ -104,6 +105,28 @@ class RuleBasedSummarizer:
         )
 
     # --- pieces ---
+
+    def _validate_price_frame(self, daily: pd.DataFrame) -> None:
+        required = {"open", "high", "low", "close"}
+        if daily.empty or not required.issubset(daily.columns):
+            raise MarketDataQualityError(
+                "last close unavailable; ticker has no usable price data"
+            )
+        prices = daily[list(required)]
+        if prices.empty or prices.isna().any().any():
+            raise MarketDataQualityError(
+                "last close unavailable or non-positive; ticker has bad price data"
+            )
+        closes = daily["close"]
+        if closes.empty:
+            raise MarketDataQualityError(
+                "last close unavailable; ticker has no usable price data"
+            )
+        last_close = float(closes.iloc[-1])
+        if not np.isfinite(last_close) or last_close <= 0:
+            raise MarketDataQualityError(
+                "last close unavailable or non-positive; ticker has bad price data"
+            )
 
     def _price_snapshot(self, closes: pd.Series) -> PriceSnapshot:
         last = float(closes.iloc[-1])

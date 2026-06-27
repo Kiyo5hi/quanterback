@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import pytest
 import pandas as pd
+import pytest
 
 from quanterback.adapters.data.yfinance_provider import YFinanceProvider
+from quanterback.domain.market import MarketDataQualityError
 from tests.fakes.yfinance_stub import StubTicker, make_daily_df, make_hourly_df
 
 
@@ -43,6 +44,22 @@ def test_normalize_drops_incomplete_price_rows() -> None:
 
     assert len(out) == 1
     assert out["close"].iloc[-1] == 10.5
+
+
+def test_fetch_rejects_empty_daily_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class EmptyTicker:
+        def history(self, *, period: str, interval: str) -> pd.DataFrame:
+            return pd.DataFrame()
+
+    monkeypatch.setattr(
+        "quanterback.adapters.data.yfinance_provider.yf.Ticker",
+        lambda symbol: EmptyTicker(),
+    )
+
+    with pytest.raises(MarketDataQualityError, match="no usable daily price data"):
+        YFinanceProvider(cache_dir=tmp_path, cache_ttl_hours=4).fetch("ZHIPU")
 
 
 def test_bad_price_cache_is_ignored(
@@ -146,7 +163,7 @@ def test_fetch_insider_activity_aggregates(provider: YFinanceProvider) -> None:
 def test_fetch_analyst_actions_filters_to_window(provider: YFinanceProvider) -> None:
     actions = provider.fetch_analyst_actions("AAPL", lookback_days=14)
     assert isinstance(actions, list)
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=14)).date()
     for action in actions:
         assert action.date >= cutoff

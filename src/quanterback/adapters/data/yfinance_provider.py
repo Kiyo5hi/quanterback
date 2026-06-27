@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote_plus
-import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
@@ -16,6 +16,7 @@ from quanterback.domain.market import (
     AnalystAction,
     EpsTrend,
     InsiderActivity,
+    MarketDataQualityError,
     NewsItem,
     PriceWindow,
     ShortInterestSnapshot,
@@ -43,6 +44,10 @@ class YFinanceProvider:
             t = yf.Ticker(ticker)
             if daily is None:
                 daily = self._normalize(t.history(period="1y", interval="1d"))
+                if daily.empty:
+                    raise MarketDataQualityError(
+                        "last close unavailable; ticker has no usable daily price data"
+                    )
                 self._write_cache(ticker, "daily", daily, now)
             if hourly is None:
                 hourly = self._normalize(t.history(period="30d", interval="1h"))
@@ -52,8 +57,13 @@ class YFinanceProvider:
 
     @staticmethod
     def _normalize(df: pd.DataFrame) -> pd.DataFrame:
+        columns = ["open", "high", "low", "close", "volume"]
+        if df.empty:
+            return pd.DataFrame(columns=columns)
         out = df.rename(columns={c: c.lower() for c in df.columns})
-        out = out[["open", "high", "low", "close", "volume"]].copy()
+        if not set(columns).issubset(out.columns):
+            return pd.DataFrame(columns=columns)
+        out = out[columns].copy()
         required = ["open", "high", "low", "close"]
         out = out.dropna(subset=required)
         out = out[out["close"] > 0]

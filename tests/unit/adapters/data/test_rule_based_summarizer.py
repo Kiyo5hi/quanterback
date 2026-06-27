@@ -59,6 +59,19 @@ def test_summarize_rejects_zero_atr_data() -> None:
         RuleBasedSummarizer().summarize(pw)
 
 
+def test_summarize_rejects_empty_price_window() -> None:
+    empty = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    pw = PriceWindow(
+        ticker="ZHIPU",
+        daily=empty,
+        hourly=empty,
+        as_of=datetime(2026, 5, 22, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(MarketDataQualityError, match="no usable price data"):
+        RuleBasedSummarizer().summarize(pw)
+
+
 def _short_history_window() -> PriceWindow:
     idx = pd.date_range(end=datetime(2026, 6, 25, tzinfo=timezone.utc), periods=9, freq="B")
     closes = np.array([24.0, 24.8, 25.2, 24.9, 25.7, 26.2, 27.1, 26.8, 27.4])
@@ -69,7 +82,11 @@ def _short_history_window() -> PriceWindow:
         "close": closes,
         "volume": np.full(9, 900_000),
     }, index=idx)
-    hourly_idx = pd.date_range(end=datetime(2026, 6, 25, 20, tzinfo=timezone.utc), periods=40, freq="h")
+    hourly_idx = pd.date_range(
+        end=datetime(2026, 6, 25, 20, tzinfo=timezone.utc),
+        periods=40,
+        freq="h",
+    )
     hourly_closes = np.linspace(25.5, 27.4, 40)
     hourly = pd.DataFrame({
         "open": hourly_closes * 0.998,
@@ -173,8 +190,9 @@ def test_summarize_with_earnings_date_fills_days_to_next_earnings() -> None:
 
 
 def test_summarize_passes_through_insider_and_analyst() -> None:
-    from quanterback.domain.market import InsiderActivity, AnalystAction
     from datetime import date
+
+    from quanterback.domain.market import AnalystAction, InsiderActivity
     pw = _uptrending_window()
     ia = InsiderActivity(n_buys=2, n_sells=0, total_buy_usd=500_000.0)
     actions = [
