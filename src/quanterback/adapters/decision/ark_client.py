@@ -31,7 +31,7 @@ class ArkClient:
         self, *, api_key: str, model: str,
         base_url: str = ARK_DEFAULT_BASE_URL,
         max_tokens: int = 1024,
-        timeout: float = 45.0,
+        timeout: float = 180.0,
         thinking_effort: str = "off",
     ) -> None:
         self._client = OpenAI(api_key=api_key, base_url=base_url)

@@ -101,9 +101,10 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
             return ToolResult(
                 ok=False,
                 message=(
-                    f"我开始分析 {ticker} 了，但这次研究流程超时了。"
-                    "这通常是模型服务响应太慢。当前部署会串行处理多专家分析，"
-                    "你可以稍后重试，或先减少连续提交的分析请求。"
+                    f"我已经拿到 {ticker} 的行情摘要，但多专家模型分析没有在"
+                    "本次等待窗口内完成。这不是 ticker 不能分析，通常是模型服务"
+                    "响应过慢。请稍后重试；当前部署会串行处理研究请求，避免并发"
+                    "把专家分析打爆。"
                 ),
                 data={"ticker": ticker, "error_type": "timeout"},
             )
@@ -165,7 +166,7 @@ def _canonical_ticker(raw: str) -> str:
     return ticker
 
 
-def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 240.0):
+def _analyze_with_timeout(analyzer: ResearchAnalyzer, ticker: str, timeout_s: float = 420.0):
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         future = pool.submit(analyzer.analyze_ticker, ticker)
