@@ -97,6 +97,27 @@ def test_chat_service_reports_disabled_tool(tmp_path) -> None:
     assert "没有启用工具" in reply.text
 
 
+def test_chat_service_help_is_human_readable(tmp_path) -> None:
+    service, _store = _service(tmp_path)
+
+    reply = service.handle(_request("你能干嘛"))
+
+    assert reply.ok is False
+    assert "QuanterChat" in reply.text
+    assert "research.watchlist_add" not in reply.text
+    assert "帮我关注" in reply.text
+
+
+def test_chat_service_unknown_reply_gives_next_steps(tmp_path) -> None:
+    service, _store = _service(tmp_path)
+
+    reply = service.handle(_request("今天心情怎么样"))
+
+    assert reply.ok is False
+    assert "我没太理解" in reply.text
+    assert "分析 NVDA" in reply.text
+
+
 def test_chat_service_routes_natural_language_with_llm_intent(tmp_path) -> None:
     store = SqliteStore(tmp_path / "q.sqlite")
     catalog = build_research_catalog(store=store)

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from quanterback.capabilities.research import ResearchAnalyzer
+from quanterback.domain.market import MarketDataQualityError
 from quanterback.domain.research import ResearchAuditEvent
 from quanterback.interfaces.research_store import ResearchStore
 from quanterback.tools.registry import (
@@ -63,7 +64,17 @@ def analyze_ticker_tool(analyzer: ResearchAnalyzer) -> Tool:
         ticker = str(params.get("ticker") or "").strip().upper()
         if not ticker:
             return ToolResult(ok=False, message="ticker is required")
-        result = analyzer.analyze_ticker(ticker)
+        try:
+            result = analyzer.analyze_ticker(ticker)
+        except MarketDataQualityError as exc:
+            return ToolResult(
+                ok=False,
+                message=(
+                    f"我没法可靠分析 {ticker}：行情源没有足够可用价格数据。"
+                    "可能是 ticker 不对、数据源暂时缺数据，或这个标的不适合当前分析流程。"
+                ),
+                data={"ticker": ticker, "error": str(exc), "error_type": "market_data_quality"},
+            )
         decision = result.decision
         summary = result.summary
         return ToolResult(

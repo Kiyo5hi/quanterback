@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from quanterback.adapters.store.sqlite_store import SqliteStore
 from quanterback.domain.decision import StrategyDecision
+from quanterback.domain.market import MarketDataQualityError
 from quanterback.tools.registry import ToolContext, ToolRegistry, ToolSideEffect
 from quanterback.tools.research import (
     analyze_ticker_tool,
@@ -50,6 +51,11 @@ class FakeAnalyzer:
         )
 
 
+class BadDataAnalyzer:
+    def analyze_ticker(self, ticker: str) -> FakeAnalysis:
+        raise MarketDataQualityError("last close unavailable or non-positive")
+
+
 def test_analyze_ticker_tool_manifest_is_research_read_only() -> None:
     tool = analyze_ticker_tool(FakeAnalyzer())  # type: ignore[arg-type]
 
@@ -81,6 +87,19 @@ def test_analyze_ticker_tool_requires_setup_and_allowed_interface() -> None:
     assert ok.ok is True
     assert ok.data["ticker"] == "NVDA"
     assert analyzer.last_ticker == "NVDA"
+
+
+def test_analyze_ticker_tool_returns_friendly_data_quality_error() -> None:
+    tool = analyze_ticker_tool(BadDataAnalyzer())  # type: ignore[arg-type]
+
+    result = tool.execute(
+        {"ticker": "SPCX"},
+        ToolContext(interface="research_chat", setup=frozenset({"llm", "market_data"})),
+    )
+
+    assert result.ok is False
+    assert "没法可靠分析 SPCX" in result.message
+    assert result.data["error_type"] == "market_data_quality"
 
 
 def test_registry_lists_only_tools_available_for_context() -> None:
