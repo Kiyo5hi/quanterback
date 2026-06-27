@@ -8,6 +8,7 @@ from quanterback.chat.models import ChatRequest
 from quanterback.chat.service import ResearchChatService
 from quanterback.interfaces.decision import ChatMessage, ChatResponse
 from quanterback.tools.capabilities import CapabilitySelection, build_research_catalog
+from quanterback.tools.registry import ToolResult
 
 
 def _request(text: str) -> ChatRequest:
@@ -148,3 +149,52 @@ def test_chat_service_routes_natural_language_with_llm_intent(tmp_path) -> None:
     assert reply.ok is True
     assert llm.calls == 1
     assert "NVDA" in listed.text
+
+
+def test_chat_service_formats_analysis_result(tmp_path) -> None:
+    service, _store = _service(tmp_path)
+
+    reply = service._render_result(ToolResult(
+        ok=True,
+        message="fallback",
+        data={
+            "ticker": "MU",
+            "action": "PASS",
+            "confidence": 0.42,
+            "rationale": "技术趋势不错，但专家共识不足，因此先观察。",
+            "summary": {
+                "price": {
+                    "last_close": 123.45,
+                    "return_1d": 0.012,
+                    "return_5d": 0.034,
+                    "return_20d": 0.08,
+                },
+                "volatility": {"atr_pct_of_price": 0.041, "regime": "normal"},
+                "volume": {"volume_ratio": 1.7, "regime": "elevated"},
+                "technicals": {"rsi_14": 61.2, "macd_signal": "bullish_cross"},
+            },
+            "decision": {
+                "agent_debate": {
+                    "fundamentalist": {
+                        "lean": "neutral",
+                        "confidence": 0.5,
+                        "key_points": ["估值数据不足"],
+                        "rationale": "基本面没有强信号",
+                    },
+                    "technician": {
+                        "lean": "bullish",
+                        "confidence": 0.7,
+                        "key_points": ["价格站上主要均线"],
+                        "rationale": "趋势偏强",
+                    },
+                    "sentiment": None,
+                },
+            },
+        },
+    ))
+
+    assert "MU 研究结果" in reply.text
+    assert "关键指标:" in reply.text
+    assert "专家观点:" in reply.text
+    assert "综合理由:" in reply.text
+    assert "MU — PASS" not in reply.text

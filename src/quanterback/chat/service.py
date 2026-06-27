@@ -143,11 +143,7 @@ class ResearchChatService:
         if result.data.get("action") and result.data.get("ticker"):
             return ChatReply(
                 ok=result.ok,
-                text=(
-                    f"{result.data['ticker']} — {result.data['action']} "
-                    f"({float(result.data.get('confidence', 0.0)):.2f})\n"
-                    f"{result.data.get('rationale') or result.message}"
-                ),
+                text=_render_analysis_result(result),
             )
         return ChatReply(ok=result.ok, text=result.message or str(result.data))
 
@@ -268,6 +264,119 @@ def _friendly_error(exc: Exception) -> str:
     if "ticker is required" in message:
         return "我没有识别到股票代码。"
     return message[:220] or exc.__class__.__name__
+
+
+def _render_analysis_result(result: ToolResult) -> str:
+    data = result.data
+    ticker = str(data.get("ticker") or "")
+    action = str(data.get("action") or "")
+    confidence = _fmt_float(data.get("confidence"), digits=2)
+    rationale = str(data.get("rationale") or result.message or "").strip()
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    decision = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+
+    lines = [
+        f"{ticker} 研究结果",
+        "",
+        f"结论: {action}    置信度: {confidence}",
+    ]
+
+    metrics = _analysis_metric_lines(summary)
+    if metrics:
+        lines.extend(["", "关键指标:", *metrics])
+
+    expert_lines = _expert_lines(decision)
+    if expert_lines:
+        lines.extend(["", "专家观点:", *expert_lines])
+
+    if rationale:
+        lines.extend(["", "综合理由:", _wrap_text(rationale, limit=520)])
+
+    lines.extend(["", "说明: 这是研究结论，不会自动下单。"])
+    return "\n".join(lines)
+
+
+def _analysis_metric_lines(summary: dict) -> list[str]:
+    price = summary.get("price") if isinstance(summary.get("price"), dict) else {}
+    volume = summary.get("volume") if isinstance(summary.get("volume"), dict) else {}
+    volatility = (
+        summary.get("volatility")
+        if isinstance(summary.get("volatility"), dict)
+        else {}
+    )
+    technicals = (
+        summary.get("technicals")
+        if isinstance(summary.get("technicals"), dict)
+        else {}
+    )
+    out: list[str] = []
+    last_close = _fmt_float(price.get("last_close"), digits=2)
+    ret_1d = _fmt_pct(price.get("return_1d"))
+    ret_5d = _fmt_pct(price.get("return_5d"))
+    ret_20d = _fmt_pct(price.get("return_20d"))
+    if last_close != "n/a":
+        out.append(f"- 价格: {last_close}  |  1日 {ret_1d} / 5日 {ret_5d} / 20日 {ret_20d}")
+    atr_pct = _fmt_pct(volatility.get("atr_pct_of_price"))
+    vol_regime = volatility.get("regime") or "n/a"
+    out.append(f"- 波动: ATR/价格 {atr_pct}  |  regime {vol_regime}")
+    volume_ratio = _fmt_float(volume.get("volume_ratio"), digits=2)
+    volume_regime = volume.get("regime") or "n/a"
+    out.append(f"- 成交量: {volume_ratio}x  |  regime {volume_regime}")
+    rsi = _fmt_float(technicals.get("rsi_14"), digits=1)
+    macd = technicals.get("macd_signal") or "n/a"
+    out.append(f"- 技术: RSI {rsi}  |  MACD {macd}")
+    return out
+
+
+def _expert_lines(decision: dict) -> list[str]:
+    debate = decision.get("agent_debate")
+    if not isinstance(debate, dict):
+        return []
+    labels = {
+        "fundamentalist": "基本面",
+        "technician": "技术面",
+        "sentiment": "情绪/新闻",
+    }
+    out: list[str] = []
+    for key, label in labels.items():
+        thesis = debate.get(key)
+        if not isinstance(thesis, dict):
+            out.append(f"- {label}: 未产出")
+            continue
+        lean = thesis.get("lean") or "n/a"
+        confidence = _fmt_float(thesis.get("confidence"), digits=2)
+        rationale = str(thesis.get("rationale") or "").strip()
+        point = ""
+        points = thesis.get("key_points")
+        if isinstance(points, list) and points:
+            point = str(points[0])
+        detail = point or rationale
+        out.append(
+            f"- {label}: {lean} ({confidence})"
+            + (f" - {_wrap_text(detail, limit=110)}" if detail else "")
+        )
+    return out
+
+
+def _fmt_float(value: object, *, digits: int) -> str:
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _fmt_pct(value: object) -> str:
+    try:
+        return f"{float(value):+.1%}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _wrap_text(text: str, *, limit: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 1)].rstrip() + "..."
 
 
 def _redact_params(params: dict) -> dict:
