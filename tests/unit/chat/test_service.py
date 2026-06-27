@@ -7,6 +7,7 @@ from quanterback.chat.intent import LLMIntentResolver
 from quanterback.chat.models import ChatRequest
 from quanterback.chat.service import ResearchChatService
 from quanterback.interfaces.decision import ChatMessage, ChatResponse
+from quanterback.ticker_resolver import TickerResolver
 from quanterback.tools.capabilities import CapabilitySelection, build_research_catalog
 from quanterback.tools.registry import (
     Tool,
@@ -251,3 +252,87 @@ def test_chat_service_runs_multiple_ticker_analyses_from_one_message(tmp_path) -
     assert "TSLA 研究结果" in reply.text
     assert "SPCX 研究结果" in reply.text
     assert "---" in reply.text
+
+
+def test_chat_service_asks_user_to_choose_ambiguous_ticker(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    calls: list[str] = []
+
+    def analyze(params: dict, _context: ToolContext) -> ToolResult:
+        ticker = str(params["ticker"])
+        calls.append(ticker)
+        return ToolResult(
+            ok=True,
+            data={"ticker": ticker, "action": "PASS", "rationale": "ok"},
+        )
+
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=analyze,
+        ),
+    ])
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        ticker_resolver=TickerResolver(search_fn=lambda _q, _limit: []),
+    )
+
+    first = service.handle(_request("分析阿里"))
+    second = service.handle(_request("港股"))
+
+    assert first.ok is False
+    assert "BABA" in first.text
+    assert "9988.HK" in first.text
+    assert calls == ["9988.HK"]
+    assert "9988.HK 研究结果" in second.text
+
+
+def test_chat_service_blocks_unresolved_llm_guessed_ticker(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=lambda _params, _context: ToolResult(ok=False, message="should not run"),
+        ),
+    ])
+    llm = FakeLLM(
+        '{"kind":"tool","tool_name":"research.analyze_ticker",'
+        '"params":{"ticker":"ZHIPU"},"confidence":0.91}'
+    )
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        intent_resolver=LLMIntentResolver(llm),
+        ticker_resolver=TickerResolver(
+            search_fn=lambda _q, _limit: [
+                # Search may return irrelevant crypto-like noise; it should be ignored.
+            ]
+        ),
+    )
+
+    reply = service.handle(_request("分析智谱股票"))
+
+    assert reply.ok is False
+    assert "没找到" in reply.text
+    assert "Zhipu" in reply.text

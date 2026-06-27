@@ -7,6 +7,7 @@ from quanterback.chat.intent import LLMIntentResolver
 from quanterback.chat.models import ChatIntent, ChatReply, ChatRequest
 from quanterback.chat.router import ResearchChatRouter
 from quanterback.interfaces.research_store import ResearchStore
+from quanterback.ticker_resolver import TickerCandidate, TickerResolver
 from quanterback.tickers import extract_tickers
 from quanterback.tools.registry import ToolContext, ToolRegistry, ToolResult
 
@@ -20,11 +21,20 @@ class PendingToolCall:
 
 
 @dataclass
+class PendingTickerChoice:
+    tool_name: str
+    params: dict
+    query: str
+    candidates: tuple[TickerCandidate, ...]
+
+
+@dataclass
 class ResearchChatService:
     store: ResearchStore
     registry: ToolRegistry
     router: ResearchChatRouter = field(default_factory=ResearchChatRouter)
     intent_resolver: LLMIntentResolver | None = None
+    ticker_resolver: TickerResolver = field(default_factory=TickerResolver)
     interface: str = "research_chat"
     setup: frozenset[str] = field(
         default_factory=lambda: frozenset({"research_store", "market_data", "llm"})
@@ -32,6 +42,7 @@ class ResearchChatService:
     language: str = "zh"
     timezone: str = "UTC"
     pending: dict[str, PendingToolCall] = field(default_factory=dict)
+    pending_ticker_choices: dict[str, PendingTickerChoice] = field(default_factory=dict)
 
     def handle(self, request: ChatRequest) -> ChatReply:
         user = self.store.research_upsert_user(
@@ -48,6 +59,23 @@ class ResearchChatService:
             request.external_user_id,
             request.external_chat_id,
         )
+        pending_choice = self.pending_ticker_choices.get(key)
+        if pending_choice is not None:
+            selected = _select_ticker_candidate(request.text, pending_choice.candidates)
+            if selected is not None:
+                self.pending_ticker_choices.pop(key, None)
+                params = {**pending_choice.params, "ticker": selected.symbol}
+                return self._execute(
+                    pending_choice.tool_name,
+                    params,
+                    user_id=user.id,
+                    confirmed=False,
+                )
+            if request.text.strip().lower() in {"取消", "cancel", "no", "n"}:
+                self.pending_ticker_choices.pop(key, None)
+                return ChatReply(text="已取消。")
+            return ChatReply(text=_render_ticker_choices(pending_choice), ok=False)
+
         intent = self.router.route(request.text)
         context = self._tool_context(user.id)
         if intent.kind == "unknown" and not request.text.strip().startswith("/"):
@@ -79,6 +107,7 @@ class ResearchChatService:
             )
         if intent.kind == "cancel":
             existed = self.pending.pop(key, None) is not None
+            existed = self.pending_ticker_choices.pop(key, None) is not None or existed
             return ChatReply(text="已取消。" if existed else "没有等待取消的操作。")
         if intent.kind == "help":
             return ChatReply(text=self.help_text())
@@ -90,6 +119,28 @@ class ResearchChatService:
             if len(tickers) > 1:
                 reply = self._execute_many_analyses(tickers, user_id=user.id)
                 return reply
+            resolved = self.ticker_resolver.resolve(
+                request.text,
+                proposed_ticker=str(intent.params.get("ticker") or ""),
+            )
+            if resolved.ambiguous:
+                pending_choice = PendingTickerChoice(
+                    tool_name=intent.tool_name,
+                    params=intent.params,
+                    query=resolved.query,
+                    candidates=resolved.candidates,
+                )
+                self.pending_ticker_choices[key] = pending_choice
+                return ChatReply(text=_render_ticker_choices(pending_choice), ok=False)
+            if not resolved.found:
+                return ChatReply(text=_ticker_not_found_text(resolved.query), ok=False)
+            if resolved.ticker:
+                intent = ChatIntent(
+                    kind="tool",
+                    tool_name=intent.tool_name,
+                    params={**intent.params, "ticker": resolved.ticker},
+                    confidence=intent.confidence,
+                )
 
         reply = self._execute(intent.tool_name, intent.params, user_id=user.id, confirmed=False)
         if reply.confirmation_required:
@@ -290,6 +341,62 @@ def _looks_like_greeting(text: str) -> bool:
 
 def _looks_like_local_reply(text: str) -> bool:
     return _looks_like_greeting(text) or _looks_like_capability_question(text)
+
+
+def _render_ticker_choices(choice: PendingTickerChoice) -> str:
+    lines = [
+        "我找到多个可能的 ticker，请确认你要看哪一个：",
+        "",
+    ]
+    for idx, candidate in enumerate(choice.candidates, start=1):
+        lines.append(f"{idx}. {candidate.label()}")
+    lines.extend([
+        "",
+        "回复序号、`港股`、`美股`，或直接回复 ticker。",
+    ])
+    return "\n".join(lines)
+
+
+def _select_ticker_candidate(
+    text: str, candidates: tuple[TickerCandidate, ...],
+) -> TickerCandidate | None:
+    raw = text.strip()
+    lowered = raw.lower()
+    if raw.isdigit():
+        idx = int(raw)
+        if 1 <= idx <= len(candidates):
+            return candidates[idx - 1]
+    if lowered in {"港股", "香港", "hk", "hong kong"}:
+        return _first_candidate_matching(candidates, lambda c: c.symbol.endswith(".HK"))
+    if lowered in {"美股", "美国", "us", "usa", "nyse", "nasdaq"}:
+        return _first_candidate_matching(
+            candidates,
+            lambda c: c.exchange.upper() in {"NYSE", "NASDAQ"} or "." not in c.symbol,
+        )
+    for candidate in candidates:
+        if lowered == candidate.symbol.lower():
+            return candidate
+    return None
+
+
+def _first_candidate_matching(
+    candidates: tuple[TickerCandidate, ...],
+    predicate,
+) -> TickerCandidate | None:
+    for candidate in candidates:
+        if predicate(candidate):
+            return candidate
+    return None
+
+
+def _ticker_not_found_text(query: str) -> str:
+    if query:
+        return (
+            f"我没找到 `{query}` 对应的可用股票 ticker。\n\n"
+            "它可能还没有上市、不是 Yahoo Finance 支持的标的，"
+            "或者需要你直接给我交易所代码。"
+        )
+    return "我没有识别到可用的股票代码。你可以直接发 ticker，比如 `NVDA` 或 `1810.HK`。"
 
 
 def _friendly_error(exc: Exception) -> str:
