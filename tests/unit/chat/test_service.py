@@ -197,4 +197,6 @@ def test_chat_service_formats_analysis_result(tmp_path) -> None:
     assert "关键指标:" in reply.text
     assert "专家观点:" in reply.text
     assert "综合理由:" in reply.text
+    assert "结论: PASS    置信度" not in reply.text
+    assert "这是研究结论" not in reply.text
     assert "MU — PASS" not in reply.text

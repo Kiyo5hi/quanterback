@@ -278,7 +278,7 @@ def _render_analysis_result(result: ToolResult) -> str:
     lines = [
         f"{ticker} 研究结果",
         "",
-        f"结论: {action}    置信度: {confidence}",
+        f"结论: {action}" if action == "PASS" else f"结论: {action}    置信度: {confidence}",
     ]
 
     metrics = _analysis_metric_lines(summary)
@@ -292,7 +292,6 @@ def _render_analysis_result(result: ToolResult) -> str:
     if rationale:
         lines.extend(["", "综合理由:", _wrap_text(rationale, limit=520)])
 
-    lines.extend(["", "说明: 这是研究结论，不会自动下单。"])
     return "\n".join(lines)
 
 
@@ -318,13 +317,17 @@ def _analysis_metric_lines(summary: dict) -> list[str]:
         out.append(f"- 价格: {last_close}  |  1日 {ret_1d} / 5日 {ret_5d} / 20日 {ret_20d}")
     atr_pct = _fmt_pct(volatility.get("atr_pct_of_price"))
     vol_regime = volatility.get("regime") or "n/a"
-    out.append(f"- 波动: ATR/价格 {atr_pct}  |  regime {vol_regime}")
+    if atr_pct != "n/a" or vol_regime != "n/a":
+        out.append(f"- 波动: ATR/价格 {atr_pct}  |  regime {vol_regime}")
     volume_ratio = _fmt_float(volume.get("volume_ratio"), digits=2)
     volume_regime = volume.get("regime") or "n/a"
-    out.append(f"- 成交量: {volume_ratio}x  |  regime {volume_regime}")
+    if volume_ratio != "n/a" or volume_regime != "n/a":
+        ratio = f"{volume_ratio}x" if volume_ratio != "n/a" else "n/a"
+        out.append(f"- 成交量: {ratio}  |  regime {volume_regime}")
     rsi = _fmt_float(technicals.get("rsi_14"), digits=1)
     macd = technicals.get("macd_signal") or "n/a"
-    out.append(f"- 技术: RSI {rsi}  |  MACD {macd}")
+    if rsi != "n/a" or macd != "n/a":
+        out.append(f"- 技术: RSI {rsi}  |  MACD {macd}")
     return out
 
 
