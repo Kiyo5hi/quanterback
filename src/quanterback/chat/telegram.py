@@ -42,6 +42,7 @@ class TelegramResearchBot:
     def listen(self) -> None:
         for request in self._updates():
             if not self._is_authorized(request):
+                self._reply(request, _authorization_error_text(request))
                 continue
             self._executor.submit(self._handle_one, request)
 
@@ -237,6 +238,15 @@ def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if cur:
         out.append(cur)
     return out
+
+
+def _authorization_error_text(request: ChatRequest) -> str:
+    return (
+        "你还没有被授权使用这个 bot。\n\n"
+        f"user_id: {request.external_user_id}\n"
+        f"chat_id: {request.external_chat_id}\n\n"
+        "请把这两个 ID 发给管理员开通白名单。"
+    )
 
 
 class _ProcessingStatus:
