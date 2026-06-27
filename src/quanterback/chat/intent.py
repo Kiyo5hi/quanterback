@@ -4,12 +4,17 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
 from quanterback.chat.models import ChatIntent
-from quanterback.interfaces.decision import ChatMessage, LLMClient
+from quanterback.interfaces.decision import (
+    ChatMessage,
+    ChatTool,
+    LLMClient,
+    ToolCallingLLMClient,
+)
 from quanterback.tools.registry import ToolManifest
 
 log = logging.getLogger(__name__)
@@ -38,6 +43,70 @@ class LLMIntentResolver:
             return ChatIntent(kind="unknown", confidence=0.0)
 
         tool_names = {tool.name for tool in tools}
+        tool_intent = self._resolve_with_tool_call(text, tools)
+        if tool_intent is not None:
+            if tool_intent.tool_name in tool_names:
+                return tool_intent
+            log.warning("LLM selected unavailable tool: %s", tool_intent.tool_name)
+            return ChatIntent(kind="unknown", confidence=0.0)
+
+        return self._resolve_with_json_intent(text, tools, tool_names)
+
+    def _resolve_with_tool_call(
+        self, text: str, tools: list[ToolManifest],
+    ) -> ChatIntent | None:
+        if not hasattr(self.llm_client, "chat_tool_call"):
+            return None
+        names = _tool_name_map(tools)
+        messages = [
+            ChatMessage(
+                role="system",
+                content=(
+                    "You are an intent router for a Telegram finance assistant. "
+                    "Call exactly one available function when the user's request "
+                    "matches a supported tool. Do not call a function for unsupported "
+                    "requests. Normalize ticker symbols to uppercase."
+                ),
+            ),
+            ChatMessage(
+                role="user",
+                content=text,
+            ),
+        ]
+        chat_tools = [
+            ChatTool(
+                name=safe_name,
+                description=tool.description,
+                input_schema=tool.input_schema,
+            )
+            for safe_name, tool in names.items()
+        ]
+        client = cast(ToolCallingLLMClient, self.llm_client)
+        try:
+            call = client.chat_tool_call(
+                messages,
+                tools=chat_tools,
+                temperature=0.0,
+            )
+        except Exception as exc:
+            log.warning("LLM function-call intent routing failed: %s", exc)
+            return None
+        if call is None:
+            return None
+        tool = names.get(call.name)
+        if tool is None:
+            log.warning("LLM called unknown function: %s", call.name)
+            return ChatIntent(kind="unknown", confidence=0.0)
+        return ChatIntent(
+            kind="tool",
+            tool_name=tool.name,
+            params=call.arguments,
+            confidence=0.9,
+        )
+
+    def _resolve_with_json_intent(
+        self, text: str, tools: list[ToolManifest], tool_names: set[str],
+    ) -> ChatIntent:
         messages = [
             ChatMessage(
                 role="system",
@@ -65,9 +134,7 @@ class LLMIntentResolver:
         ]
         try:
             response = self.llm_client.chat(
-                messages,
-                response_schema=_INTENT_SCHEMA,
-                temperature=0.0,
+                messages, response_schema=_INTENT_SCHEMA, temperature=0.0,
             )
             payload = _parse_json_object(response.content)
             intent = ChatIntent.model_validate(payload)
@@ -91,6 +158,16 @@ def _tool_payload(tool: ToolManifest) -> dict[str, Any]:
         "requires_confirmation": tool.requires_confirmation,
         "side_effect": tool.side_effect.value,
     }
+
+
+def _tool_name_map(tools: list[ToolManifest]) -> dict[str, ToolManifest]:
+    out: dict[str, ToolManifest] = {}
+    for tool in tools:
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "__", tool.name)
+        if safe_name in out:
+            raise ValueError(f"tool name collision after sanitizing: {tool.name}")
+        out[safe_name] = tool
+    return out
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

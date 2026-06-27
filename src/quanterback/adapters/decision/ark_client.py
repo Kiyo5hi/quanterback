@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from openai import BadRequestError, OpenAI
 from openai.types.chat import ChatCompletion
 
-from quanterback.interfaces.decision import ChatMessage, ChatResponse
+from quanterback.interfaces.decision import ChatMessage, ChatResponse, ChatTool, ChatToolCall
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class ArkClient:
         self._max_tokens = max_tokens
         self._thinking_effort = thinking_effort
         self._use_tools: bool | None = None
+        self._use_named_tools: bool | None = None
         self._use_response_format: bool | None = None
 
     def _build_extra_body(self) -> dict | None:
@@ -134,6 +136,76 @@ class ArkClient:
         # Tier 3: plain
         resp = self._client.chat.completions.create(**base_kwargs)
         return self._to_response(resp, resp.choices[0].message.content or "")
+
+    def chat_tool_call(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[ChatTool],
+        temperature: float = 0.0,
+    ) -> ChatToolCall | None:
+        if not tools:
+            return None
+        if self._use_named_tools is False:
+            return None
+
+        oai_messages = [{"role": m.role, "content": m.content} for m in messages]
+        kwargs: dict = {
+            "model": self._model,
+            "messages": oai_messages,
+            "temperature": temperature,
+            "max_tokens": self._max_tokens,
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema,
+                    },
+                }
+                for tool in tools
+            ],
+            "tool_choice": "auto",
+        }
+        extra_body = self._build_extra_body()
+        if extra_body is not None:
+            kwargs["extra_body"] = extra_body
+        try:
+            resp = self._client.chat.completions.create(**kwargs)
+        except BadRequestError as e:
+            err_text = str(e).lower()
+            if "tool" in err_text or "function" in err_text:
+                log.warning(
+                    "Ark model %s does not support named tool calls; "
+                    "falling back to JSON intent routing.",
+                    self._model,
+                )
+                self._use_named_tools = False
+                return None
+            raise
+
+        self._use_named_tools = True
+        msg = resp.choices[0].message
+        tool_calls = getattr(msg, "tool_calls", None)
+        if not tool_calls:
+            return None
+        call = tool_calls[0]
+        try:
+            arguments = json.loads(call.function.arguments or "{}")
+        except json.JSONDecodeError:
+            log.warning("Ark returned invalid tool call arguments: %s", call.function.arguments)
+            return None
+        usage = resp.usage
+        return ChatToolCall(
+            name=call.function.name,
+            arguments=arguments,
+            model=getattr(resp, "model", self._model),
+            usage={
+                "input_tokens": getattr(usage, "prompt_tokens", 0) if usage else 0,
+                "output_tokens": getattr(usage, "completion_tokens", 0) if usage else 0,
+            },
+        )
 
     def _to_response(self, resp: ChatCompletion, content: str) -> ChatResponse:
         usage = resp.usage

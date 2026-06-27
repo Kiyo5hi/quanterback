@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,6 +21,21 @@ class ChatResponse(BaseModel):
     usage: dict
 
 
+class ChatTool(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+class ChatToolCall(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    name: str
+    arguments: dict[str, Any]
+    model: str
+    usage: dict
+
+
 class LLMClient(Protocol):
     def chat(
         self,
@@ -29,6 +44,16 @@ class LLMClient(Protocol):
         response_schema: dict | None = None,
         temperature: float = 0.0,
     ) -> ChatResponse: ...
+
+
+class ToolCallingLLMClient(LLMClient, Protocol):
+    def chat_tool_call(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[ChatTool],
+        temperature: float = 0.0,
+    ) -> ChatToolCall | None: ...
 
 
 class LLMStrategist(Protocol):
