@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from quanterback.chat.intent import LLMIntentResolver
 from quanterback.chat.models import ChatIntent, ChatReply, ChatRequest
 from quanterback.chat.router import ResearchChatRouter
 from quanterback.interfaces.research_store import ResearchStore
@@ -19,6 +20,7 @@ class ResearchChatService:
     store: ResearchStore
     registry: ToolRegistry
     router: ResearchChatRouter = field(default_factory=ResearchChatRouter)
+    intent_resolver: LLMIntentResolver | None = None
     interface: str = "research_chat"
     setup: frozenset[str] = field(
         default_factory=lambda: frozenset({"research_store", "market_data", "llm"})
@@ -39,6 +41,9 @@ class ResearchChatService:
         assert user.id is not None
         key = self._pending_key(request.provider, request.external_user_id, request.external_chat_id)
         intent = self.router.route(request.text)
+        context = self._tool_context(user.id)
+        if intent.kind == "unknown" and not request.text.strip().startswith("/"):
+            intent = self._resolve_natural_intent(request.text, context)
 
         if intent.kind == "confirm":
             pending = self.pending.pop(key, None)
@@ -60,10 +65,16 @@ class ResearchChatService:
             self.pending[key] = PendingToolCall(intent.tool_name, intent.params)
         return reply
 
-    def _execute(
-        self, tool_name: str, params: dict, *, user_id: int, confirmed: bool,
-    ) -> ChatReply:
-        context = ToolContext(
+    def _resolve_natural_intent(self, text: str, context: ToolContext) -> ChatIntent:
+        manifests = self.registry.available_for(context)
+        if self.intent_resolver is not None:
+            intent = self.intent_resolver.resolve(text, manifests)
+            if intent.kind != "unknown":
+                return intent
+        return self.router.route_natural_fallback(text)
+
+    def _tool_context(self, user_id: int) -> ToolContext:
+        return ToolContext(
             interface=self.interface,
             user_id=str(user_id),
             chat_id=None,
@@ -72,6 +83,11 @@ class ResearchChatService:
             timezone=self.timezone,
             setup=self.setup,
         )
+
+    def _execute(
+        self, tool_name: str, params: dict, *, user_id: int, confirmed: bool,
+    ) -> ChatReply:
+        context = self._tool_context(user_id)
         try:
             result = self.registry.execute(
                 tool_name, params, context, confirmed=confirmed,

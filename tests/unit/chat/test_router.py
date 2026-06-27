@@ -18,10 +18,11 @@ def test_router_maps_slash_commands_to_tools() -> None:
 def test_router_maps_natural_language_to_tools() -> None:
     r = ResearchChatRouter()
 
-    assert r.route("分析一下 NVDA").tool_name == "research.analyze_ticker"
-    assert r.route("帮我把 SOXX 加到 watchlist").tool_name == "research.watchlist_add"
-    assert r.route("从列表删除 SPCX").tool_name == "research.watchlist_remove"
-    assert r.route("看看我的关注列表").tool_name == "research.watchlist_list"
+    assert r.route("分析一下 NVDA").kind == "unknown"
+    assert r.route_natural_fallback("分析一下nvda").tool_name == "research.analyze_ticker"
+    assert r.route_natural_fallback("帮我把 SOXX 加到 watchlist").tool_name == "research.watchlist_add"
+    assert r.route_natural_fallback("从列表删除SPCX").tool_name == "research.watchlist_remove"
+    assert r.route_natural_fallback("看看我的关注列表").tool_name == "research.watchlist_list"
 
 
 def test_router_confirm_cancel_help() -> None:
@@ -41,3 +42,4 @@ def test_router_maps_trading_commands_when_enabled() -> None:
     assert r.route("/preview nvda").tool_name == "trading.preview_tickers"
     assert r.route("/rescan").tool_name == "trading.rescan_watchlist"
     assert r.route("/watchlist add nvda").tool_name == "trading.watchlist_add"
+    assert r.route_natural_fallback("preview一下spcx").tool_name == "trading.preview_tickers"

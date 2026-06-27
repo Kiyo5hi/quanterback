@@ -50,6 +50,19 @@ from quanterback.report import generate_report
 log = logging.getLogger("quanterback")
 
 
+def _build_llm_client(config: AppConfig) -> LLMClient:
+    if config.llm_provider == "ark":
+        assert config.ark_api_key is not None
+        return ArkClient(
+            api_key=config.ark_api_key, model=config.llm_model,
+            thinking_effort=config.llm_thinking_effort,
+        )
+    return ClaudeClient(
+        api_key=config.anthropic_key, model=config.llm_model,
+        thinking_effort=config.llm_thinking_effort,
+    )
+
+
 def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str]:
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     sys_state = SqliteSystemStateService(store)
@@ -61,17 +74,7 @@ def wire(config: AppConfig) -> tuple[ScanPipeline, SqliteSystemStateService, str
         cache_dir=config.cache_dir, cache_ttl_hours=config.cache_ttl_hours,
     )
     summarizer = RuleBasedSummarizer()
-    if config.llm_provider == "ark":
-        assert config.ark_api_key is not None
-        base_llm: LLMClient = ArkClient(
-            api_key=config.ark_api_key, model=config.llm_model,
-            thinking_effort=config.llm_thinking_effort,
-        )
-    else:
-        base_llm = ClaudeClient(
-            api_key=config.anthropic_key, model=config.llm_model,
-            thinking_effort=config.llm_thinking_effort,
-        )
+    base_llm = _build_llm_client(config)
     llm_client: LLMClient = base_llm
 
     strategist: LLMStrategist = MultiAgentStrategist(
@@ -380,10 +383,12 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
     store = SqliteStore(config.db_path, watchlist_path=config.watchlist_path)
     # Broker for /status — read live Alpaca state rather than the (drift-prone) local DB.
     broker = AlpacaPaperBroker(api_key=config.alpaca_key, secret=config.alpaca_secret)
+    llm_client = _build_llm_client(config)
 
     from quanterback.adapters.control.telegram_commands import register_commands
     register_commands(token)  # best-effort
 
+    from quanterback.chat.intent import LLMIntentResolver
     from quanterback.chat.router import ResearchChatRouter
     from quanterback.chat.service import ResearchChatService
     from quanterback.chat.telegram import TelegramResearchBot
@@ -413,6 +418,7 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
         store=store,
         registry=registry,
         router=ResearchChatRouter(enable_trading_commands=True),
+        intent_resolver=LLMIntentResolver(llm_client),
         interface="trader_bot",
         setup=frozenset({"trading_state"}),
         language=config.language,
@@ -807,6 +813,7 @@ def cmd_control_bot(_args: argparse.Namespace) -> int:
 def cmd_chat_bot(_args: argparse.Namespace) -> int:
     _setup_logging()
     from quanterback.capabilities.research import ResearchAnalyzer
+    from quanterback.chat.intent import LLMIntentResolver
     from quanterback.chat.service import ResearchChatService
     from quanterback.chat.telegram import TelegramResearchBot
     from quanterback.tools.capabilities import build_research_catalog
@@ -818,19 +825,7 @@ def cmd_chat_bot(_args: argparse.Namespace) -> int:
         cache_dir=config.cache_dir, cache_ttl_hours=config.cache_ttl_hours,
     )
     summarizer = RuleBasedSummarizer()
-    if config.llm_provider == "ark":
-        assert config.ark_api_key is not None
-        base_llm: LLMClient = ArkClient(
-            api_key=config.ark_api_key,
-            model=config.llm_model,
-            thinking_effort=config.llm_thinking_effort,
-        )
-    else:
-        base_llm = ClaudeClient(
-            api_key=config.anthropic_key,
-            model=config.llm_model,
-            thinking_effort=config.llm_thinking_effort,
-        )
+    base_llm = _build_llm_client(config)
     strategist = MultiAgentStrategist(
         base_llm,
         prompts_dir=config.prompts_dir,
@@ -852,6 +847,7 @@ def cmd_chat_bot(_args: argparse.Namespace) -> int:
     service = ResearchChatService(
         store=store,
         registry=registry,
+        intent_resolver=LLMIntentResolver(base_llm),
         language=config.language,
         timezone=config.display_timezone,
     )
