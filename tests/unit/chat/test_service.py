@@ -301,6 +301,57 @@ def test_chat_service_asks_user_to_choose_ambiguous_ticker(tmp_path) -> None:
     assert "9988.HK 研究结果" in second.text
 
 
+def test_chat_service_requires_choice_for_multi_exchange_company(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    calls: list[str] = []
+
+    def analyze(params: dict, _context: ToolContext) -> ToolResult:
+        ticker = str(params["ticker"])
+        calls.append(ticker)
+        return ToolResult(
+            ok=True,
+            data={"ticker": ticker, "action": "PASS", "rationale": "ok"},
+        )
+
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=analyze,
+        ),
+    ])
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        ticker_resolver=TickerResolver(
+            search_fn=lambda _q, _limit: [
+                TickerCandidate("1810.HK", "Xiaomi Corporation", "Hong Kong"),
+                TickerCandidate("XIACY", "Xiaomi Corporation ADR", "OTC Markets"),
+            ],
+            web_search_fn=lambda _q, _limit: [],
+        ),
+    )
+
+    first = service.handle(_request("分析小米"))
+    second = service.handle(_request("OTC"))
+
+    assert first.ok is False
+    assert "不能默认替你选" in first.text
+    assert "1810.HK" in first.text
+    assert "XIACY" in first.text
+    assert calls == ["XIACY"]
+    assert "XIACY 研究结果" in second.text
+
+
 def test_chat_service_blocks_unresolved_llm_guessed_ticker(tmp_path) -> None:
     store = SqliteStore(tmp_path / "q.sqlite")
     registry = ToolRegistry([

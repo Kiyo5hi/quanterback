@@ -26,6 +26,22 @@ def test_ticker_resolver_uses_search_for_non_alias_company() -> None:
     assert result.ticker == "1810.HK"
 
 
+def test_ticker_resolver_keeps_multi_exchange_candidates() -> None:
+    resolver = TickerResolver(
+        search_fn=lambda _q, _limit: [
+            TickerCandidate("1810.HK", "Xiaomi Corporation", "Hong Kong"),
+            TickerCandidate("XIACF", "Xiaomi Corporation", "OTC Markets"),
+            TickerCandidate("XIACY", "Xiaomi Corporation ADR", "OTC Markets"),
+        ],
+        web_search_fn=lambda _q, _limit: [],
+    )
+
+    result = resolver.resolve("分析小米")
+
+    assert result.ambiguous is True
+    assert [c.symbol for c in result.candidates] == ["1810.HK", "XIACF", "XIACY"]
+
+
 def test_ticker_resolver_filters_crypto_noise() -> None:
     resolver = TickerResolver(
         search_fn=lambda _q, _limit: [

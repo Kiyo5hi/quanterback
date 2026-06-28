@@ -345,14 +345,15 @@ def _looks_like_local_reply(text: str) -> bool:
 
 def _render_ticker_choices(choice: PendingTickerChoice) -> str:
     lines = [
-        "我找到多个可能的 ticker，请确认你要看哪一个：",
+        "这家公司可能在多个市场交易，我不能默认替你选。",
+        "请明确选择你要分析的 ticker：",
         "",
     ]
     for idx, candidate in enumerate(choice.candidates, start=1):
         lines.append(f"{idx}. {candidate.label()}")
     lines.extend([
         "",
-        "回复序号、`港股`、`美股`，或直接回复 ticker。",
+        "回复序号、`港股`、`美股`、`OTC`，或直接回复 ticker。",
     ])
     return "\n".join(lines)
 
@@ -372,6 +373,11 @@ def _select_ticker_candidate(
         return _first_candidate_matching(
             candidates,
             lambda c: c.exchange.upper() in {"NYSE", "NASDAQ"} or "." not in c.symbol,
+        )
+    if lowered in {"otc", "粉单", "场外"}:
+        return _first_candidate_matching(
+            candidates,
+            lambda c: c.exchange.upper() in {"OTC MARKETS", "PNK"},
         )
     for candidate in candidates:
         if lowered == candidate.symbol.lower():

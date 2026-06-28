@@ -67,6 +67,8 @@ _QUERY_ALIASES = {
 _KNOWN_CANDIDATES = {
     "Xiaomi": (
         TickerCandidate("1810.HK", "Xiaomi Corporation", "Hong Kong"),
+        TickerCandidate("XIACF", "Xiaomi Corporation", "OTC Markets"),
+        TickerCandidate("XIACY", "Xiaomi Corporation ADR", "OTC Markets"),
     ),
     "Tencent": (
         TickerCandidate("0700.HK", "Tencent Holdings Limited", "Hong Kong"),
@@ -181,8 +183,7 @@ def _preferred_candidates(
             continue
         seen.add(symbol)
         out.append(TickerCandidate(symbol, candidate.name, exchange, candidate.quote_type))
-    primary = [c for c in out if c.exchange.upper() not in {"OTC MARKETS", "PNK"}]
-    return primary or out
+    return out
 
 
 def _yfinance_search(query: str, limit: int) -> list[TickerCandidate]:
