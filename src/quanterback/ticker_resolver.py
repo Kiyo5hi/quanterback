@@ -4,8 +4,10 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from html import unescape
 from typing import Any
 
+import requests
 import yfinance as yf  # type: ignore[import-untyped]
 
 from quanterback.tickers import canonical_ticker, extract_tickers
@@ -105,23 +107,20 @@ SearchFn = Callable[[str, int], list[TickerCandidate]]
 
 
 class TickerResolver:
-    def __init__(self, search_fn: SearchFn | None = None) -> None:
+    def __init__(
+        self,
+        search_fn: SearchFn | None = None,
+        web_search_fn: SearchFn | None = None,
+    ) -> None:
         self._search_fn = search_fn or _yfinance_search
+        self._web_search_fn = web_search_fn or _duckduckgo_search
 
     def resolve(self, text: str, proposed_ticker: str | None = None) -> TickerResolution:
         query = _extract_query(text)
-        known = _KNOWN_CANDIDATES.get(query) if query else None
-        if known is not None:
-            candidates = _preferred_candidates(known)
-            if len(candidates) == 1:
-                return TickerResolution(ticker=candidates[0].symbol, query=query)
-            return TickerResolution(candidates=tuple(candidates), query=query)
-
-        explicit = extract_tickers(text)
-        if explicit:
-            return TickerResolution(ticker=explicit[0], query=explicit[0])
-
         if not query:
+            explicit = extract_tickers(text)
+            if explicit:
+                return TickerResolution(ticker=explicit[0], query=explicit[0])
             if proposed_ticker:
                 return TickerResolution(ticker=canonical_ticker(proposed_ticker))
             return TickerResolution()
@@ -131,6 +130,19 @@ class TickerResolver:
         except Exception as exc:
             log.warning("Ticker search failed query=%r: %s", query, exc)
             candidates = []
+        if not candidates:
+            try:
+                candidates = _preferred_candidates(self._web_search_fn(query, 8))
+            except Exception as exc:
+                log.warning("Ticker web search failed query=%r: %s", query, exc)
+                candidates = []
+        if not candidates:
+            known = _KNOWN_CANDIDATES.get(query)
+            candidates = _preferred_candidates(known) if known is not None else []
+        if not candidates:
+            explicit = extract_tickers(text)
+            if explicit:
+                return TickerResolution(ticker=explicit[0], query=explicit[0])
         if len(candidates) == 1:
             return TickerResolution(ticker=candidates[0].symbol, query=query)
         if len(candidates) > 1:
@@ -185,6 +197,50 @@ def _yfinance_search(query: str, limit: int) -> list[TickerCandidate]:
             continue
         out.append(_candidate_from_quote(quote))
     return out
+
+
+def _duckduckgo_search(query: str, limit: int) -> list[TickerCandidate]:
+    resp = requests.get(
+        "https://duckduckgo.com/html/",
+        params={"q": f"{query} 股票 代码 ticker Yahoo Finance"},
+        headers={"User-Agent": "Mozilla/5.0 (compatible; quanterback/0.1)"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    text = _html_to_text(resp.text)
+    return _candidates_from_search_text(text, query, limit)
+
+
+def _html_to_text(html: str) -> str:
+    text = re.sub(r"<script\b.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", "\n", text)
+    text = unescape(text)
+    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _candidates_from_search_text(text: str, query: str, limit: int) -> list[TickerCandidate]:
+    out: list[TickerCandidate] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        for raw_symbol in _hk_symbols_from_line(line):
+            symbol = canonical_ticker(raw_symbol)
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            out.append(TickerCandidate(symbol, query, "Hong Kong"))
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def _hk_symbols_from_line(line: str) -> list[str]:
+    symbols = [match.group(0) for match in re.finditer(r"\b0?\d{4,5}\.HK\b", line, re.I)]
+    if symbols:
+        return symbols
+    if not re.search(r"(港股|港交所|Hong Kong|Yahoo|hkstock|/hk/|HK)", line, re.I):
+        return []
+    return [f"{match.group(1)}.HK" for match in re.finditer(r"(?<!\d)(0?\d{4,5})(?!\d)", line)]
 
 
 def _candidate_from_quote(quote: dict[str, Any]) -> TickerCandidate:
