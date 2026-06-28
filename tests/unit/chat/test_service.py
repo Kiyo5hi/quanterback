@@ -443,3 +443,52 @@ def test_chat_service_resolves_llm_guessed_ticker_with_web_fallback(tmp_path) ->
 
     assert calls == ["2513.HK"]
     assert "2513.HK 研究结果" in reply.text
+
+
+def test_chat_service_fallback_resolves_company_name_without_ticker(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    calls: list[str] = []
+
+    def analyze(params: dict, _context: ToolContext) -> ToolResult:
+        ticker = str(params["ticker"])
+        calls.append(ticker)
+        return ToolResult(
+            ok=True,
+            data={"ticker": ticker, "action": "PASS", "rationale": "ok"},
+        )
+
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=analyze,
+        ),
+    ])
+    llm = FakeLLM(
+        '{"kind":"unknown","tool_name":null,"params":{},"confidence":0.1}'
+    )
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        intent_resolver=LLMIntentResolver(llm),
+        ticker_resolver=TickerResolver(
+            search_fn=lambda _q, _limit: [],
+            web_search_fn=lambda _q, _limit: [
+                TickerCandidate("2513.HK", "智谱", "Hong Kong"),
+            ],
+        ),
+    )
+
+    reply = service.handle(_request("分析下智谱"))
+
+    assert calls == ["2513.HK"]
+    assert "2513.HK 研究结果" in reply.text

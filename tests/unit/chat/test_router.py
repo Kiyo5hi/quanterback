@@ -21,7 +21,12 @@ def test_router_maps_natural_language_to_tools() -> None:
 
     assert r.route("分析一下 NVDA").kind == "unknown"
     assert r.route_natural_fallback("分析一下nvda").tool_name == "research.analyze_ticker"
-    assert r.route_natural_fallback("帮我把 SOXX 加到 watchlist").tool_name == "research.watchlist_add"
+    assert r.route_natural_fallback("分析下智谱").tool_name == "research.analyze_ticker"
+    assert r.route_natural_fallback("分析下智谱").params == {}
+    assert (
+        r.route_natural_fallback("帮我把 SOXX 加到 watchlist").tool_name
+        == "research.watchlist_add"
+    )
     assert r.route_natural_fallback("从列表删除SPCX").tool_name == "research.watchlist_remove"
     assert r.route_natural_fallback("看看我的关注列表").tool_name == "research.watchlist_list"
 

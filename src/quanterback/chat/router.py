@@ -136,18 +136,18 @@ class ResearchChatRouter:
         lowered = raw.lower()
         tickers = extract_tickers(raw)
         ticker = tickers[0] if tickers else None
+        explicit_analyze_words = (
+            "analyze", "analyse", "research", "look at", "check",
+            "分析", "研究", "看看", "看下", "看一下", "查一下", "查下",
+        )
+        analyze_words = (
+            *explicit_analyze_words, "怎么样", "如何", "能买吗", "值得买", "走势", "前景",
+        )
         if self.enable_trading_commands:
             routed = self._route_trading_natural(raw, lowered, ticker)
             if routed is not None:
                 return routed
-        if ticker and _has_any(
-            lowered,
-            (
-                "analyze", "analyse", "research", "look at", "check",
-                "分析", "研究", "看看", "看下", "看一下", "查一下", "查下",
-                "怎么样", "如何", "能买吗", "值得买", "走势", "前景",
-            ),
-        ):
+        if ticker and _has_any(lowered, analyze_words):
             return ChatIntent(
                 kind="tool",
                 tool_name="research.analyze_ticker",
@@ -183,6 +183,15 @@ class ResearchChatRouter:
         ):
             return ChatIntent(
                 kind="tool", tool_name="research.list_jobs", confidence=0.6,
+            )
+        if _has_any(lowered, explicit_analyze_words) and _has_subject_after_intent_words(
+            lowered, explicit_analyze_words,
+        ):
+            return ChatIntent(
+                kind="tool",
+                tool_name="research.analyze_ticker",
+                params={},
+                confidence=0.6,
             )
         if _has_any(lowered, ("digest", "report", "日报", "报告", "简报", "复盘")):
             return ChatIntent(
@@ -232,6 +241,27 @@ def _extract_ticker(text: str) -> str | None:
 
 def _has_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(needle in text for needle in needles)
+
+
+def _has_subject_after_intent_words(text: str, needles: tuple[str, ...]) -> bool:
+    cleaned = text
+    for needle in needles:
+        cleaned = cleaned.replace(needle, " ")
+    cleaned = cleaned.translate(str.maketrans({
+        "一": " ",
+        "下": " ",
+        "个": " ",
+        "只": " ",
+        "支": " ",
+        "的": " ",
+        "?": " ",
+        "？": " ",
+        ",": " ",
+        "，": " ",
+        ".": " ",
+        "。": " ",
+    }))
+    return bool(cleaned.strip())
 
 
 def _parse_digest_args(args: list[str]) -> dict:
