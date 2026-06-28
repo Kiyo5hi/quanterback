@@ -19,12 +19,20 @@ from quanterback.tools.registry import (
 )
 
 
-def _request(text: str) -> ChatRequest:
+def _request(
+    text: str,
+    *,
+    message_id: int = 1,
+    reply_to_message_id: int | None = None,
+    callback_data: str | None = None,
+) -> ChatRequest:
     return ChatRequest(
         provider="telegram",
         external_user_id="u1",
         external_chat_id="c1",
-        message_id=1,
+        message_id=message_id,
+        reply_to_message_id=reply_to_message_id,
+        callback_data=callback_data,
         text=text,
         display_name="Alice",
         received_at=datetime.now(tz=timezone.utc),
@@ -292,11 +300,19 @@ def test_chat_service_asks_user_to_choose_ambiguous_ticker(tmp_path) -> None:
     )
 
     first = service.handle(_request("分析阿里"))
-    second = service.handle(_request("港股"))
+    service.bind_interaction_message(
+        pending_interaction_id=first.pending_interaction_id,
+        provider="telegram",
+        external_user_id="u1",
+        external_chat_id="c1",
+        message_id=99,
+    )
+    second = service.handle(_request("港股", message_id=2, reply_to_message_id=99))
 
     assert first.ok is False
     assert "BABA" in first.text
     assert "9988.HK" in first.text
+    assert first.inline_keyboard is not None
     assert calls == ["9988.HK"]
     assert "9988.HK 研究结果" in second.text
 
@@ -342,14 +358,64 @@ def test_chat_service_requires_choice_for_multi_exchange_company(tmp_path) -> No
     )
 
     first = service.handle(_request("分析小米"))
-    second = service.handle(_request("OTC"))
+    assert first.pending_interaction_id is not None
+    second = service.handle(_request(
+        "ticker callback",
+        callback_data=f"ticker_choice:{first.pending_interaction_id}:2",
+    ))
 
     assert first.ok is False
     assert "不能默认替你选" in first.text
     assert "1810.HK" in first.text
     assert "XIACY" in first.text
+    assert first.inline_keyboard is not None
     assert calls == ["XIACY"]
     assert "XIACY 研究结果" in second.text
+
+
+def test_chat_service_does_not_consume_naked_short_ticker_choice(tmp_path) -> None:
+    store = SqliteStore(tmp_path / "q.sqlite")
+    calls: list[str] = []
+
+    def analyze(params: dict, _context: ToolContext) -> ToolResult:
+        calls.append(str(params["ticker"]))
+        return ToolResult(
+            ok=True,
+            data={"ticker": str(params["ticker"]), "action": "PASS", "rationale": "ok"},
+        )
+
+    registry = ToolRegistry([
+        Tool(
+            manifest=ToolManifest(
+                name="research.analyze_ticker",
+                description="Analyze one ticker",
+                input_schema={
+                    "type": "object",
+                    "properties": {"ticker": {"type": "string"}},
+                    "required": ["ticker"],
+                },
+                side_effect=ToolSideEffect.READ_ONLY,
+                scope="research",
+            ),
+            handler=analyze,
+        ),
+    ])
+    service = ResearchChatService(
+        store=store,
+        registry=registry,
+        ticker_resolver=TickerResolver(
+            search_fn=lambda _q, _limit: [],
+            web_search_fn=lambda _q, _limit: [],
+        ),
+    )
+
+    first = service.handle(_request("分析阿里"))
+    second = service.handle(_request("1", message_id=2))
+
+    assert first.pending_interaction_id is not None
+    assert calls == []
+    assert second.ok is False
+    assert "没太理解" in second.text
 
 
 def test_chat_service_blocks_unresolved_llm_guessed_ticker(tmp_path) -> None:

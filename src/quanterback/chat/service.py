@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 from quanterback.chat.intent import LLMIntentResolver
 from quanterback.chat.models import ChatIntent, ChatReply, ChatRequest
@@ -22,10 +23,12 @@ class PendingToolCall:
 
 @dataclass
 class PendingTickerChoice:
+    choice_id: str
     tool_name: str
     params: dict
     query: str
     candidates: tuple[TickerCandidate, ...]
+    prompt_message_id: int | None = None
 
 
 @dataclass
@@ -43,6 +46,7 @@ class ResearchChatService:
     timezone: str = "UTC"
     pending: dict[str, PendingToolCall] = field(default_factory=dict)
     pending_ticker_choices: dict[str, PendingTickerChoice] = field(default_factory=dict)
+    pending_ticker_choice_by_message: dict[str, str] = field(default_factory=dict)
 
     def handle(self, request: ChatRequest) -> ChatReply:
         user = self.store.research_upsert_user(
@@ -59,11 +63,29 @@ class ResearchChatService:
             request.external_user_id,
             request.external_chat_id,
         )
-        pending_choice = self.pending_ticker_choices.get(key)
+        callback_choice = self._ticker_choice_from_callback(request.callback_data)
+        if callback_choice is not None:
+            choice_id, selected_idx = callback_choice
+            pending_choice = self.pending_ticker_choices.get(choice_id)
+            if pending_choice is None:
+                return ChatReply(text="这个 ticker 选择已经失效，请重新发起分析。", ok=False)
+            if not 1 <= selected_idx <= len(pending_choice.candidates):
+                return ChatReply(text="这个 ticker 选择无效，请重新发起分析。", ok=False)
+            self._clear_ticker_choice(key, pending_choice)
+            selected = pending_choice.candidates[selected_idx - 1]
+            params = {**pending_choice.params, "ticker": selected.symbol}
+            return self._execute(
+                pending_choice.tool_name,
+                params,
+                user_id=user.id,
+                confirmed=False,
+            )
+
+        pending_choice = self._pending_ticker_choice_for_text(key, request)
         if pending_choice is not None:
             selected = _select_ticker_candidate(request.text, pending_choice.candidates)
             if selected is not None:
-                self.pending_ticker_choices.pop(key, None)
+                self._clear_ticker_choice(key, pending_choice)
                 params = {**pending_choice.params, "ticker": selected.symbol}
                 return self._execute(
                     pending_choice.tool_name,
@@ -72,9 +94,9 @@ class ResearchChatService:
                     confirmed=False,
                 )
             if request.text.strip().lower() in {"取消", "cancel", "no", "n"}:
-                self.pending_ticker_choices.pop(key, None)
+                self._clear_ticker_choice(key, pending_choice)
                 return ChatReply(text="已取消。")
-            return ChatReply(text=_render_ticker_choices(pending_choice), ok=False)
+            return _ticker_choice_reply(pending_choice)
 
         intent = self.router.route(request.text)
         context = self._tool_context(user.id)
@@ -107,7 +129,10 @@ class ResearchChatService:
             )
         if intent.kind == "cancel":
             existed = self.pending.pop(key, None) is not None
-            existed = self.pending_ticker_choices.pop(key, None) is not None or existed
+            active_choice = self.pending_ticker_choices.get(key)
+            if active_choice is not None:
+                self._clear_ticker_choice(key, active_choice)
+                existed = True
             return ChatReply(text="已取消。" if existed else "没有等待取消的操作。")
         if intent.kind == "help":
             return ChatReply(text=self.help_text())
@@ -124,14 +149,17 @@ class ResearchChatService:
                 proposed_ticker=str(intent.params.get("ticker") or ""),
             )
             if resolved.ambiguous:
+                choice_id = uuid4().hex[:12]
                 pending_choice = PendingTickerChoice(
+                    choice_id=choice_id,
                     tool_name=intent.tool_name,
                     params=intent.params,
                     query=resolved.query,
                     candidates=resolved.candidates,
                 )
+                self.pending_ticker_choices[choice_id] = pending_choice
                 self.pending_ticker_choices[key] = pending_choice
-                return ChatReply(text=_render_ticker_choices(pending_choice), ok=False)
+                return _ticker_choice_reply(pending_choice)
             if not resolved.found:
                 return ChatReply(text=_ticker_not_found_text(resolved.query), ok=False)
             if resolved.ticker:
@@ -146,6 +174,25 @@ class ResearchChatService:
         if reply.confirmation_required:
             self.pending[key] = PendingToolCall(intent.tool_name, intent.params)
         return reply
+
+    def bind_interaction_message(
+        self,
+        *,
+        pending_interaction_id: str | None,
+        provider: str,
+        external_user_id: str,
+        external_chat_id: str,
+        message_id: int | None,
+    ) -> None:
+        if not pending_interaction_id or message_id is None:
+            return
+        choice = self.pending_ticker_choices.get(pending_interaction_id)
+        if choice is None:
+            return
+        choice.prompt_message_id = message_id
+        self.pending_ticker_choice_by_message[
+            self._message_pending_key(provider, external_user_id, external_chat_id, message_id)
+        ] = pending_interaction_id
 
     def _resolve_natural_intent(self, text: str, context: ToolContext) -> ChatIntent:
         manifests = self.registry.available_for(context)
@@ -209,6 +256,48 @@ class ResearchChatService:
             ok = ok and reply.ok
             rendered.append(reply.text)
         return ChatReply(ok=ok, text="\n\n---\n\n".join(rendered))
+
+    def _ticker_choice_from_callback(self, callback_data: str | None) -> tuple[str, int] | None:
+        if not callback_data:
+            return None
+        parts = callback_data.split(":")
+        if len(parts) != 3 or parts[0] != "ticker_choice":
+            return None
+        try:
+            return parts[1], int(parts[2])
+        except ValueError:
+            return None
+
+    def _pending_ticker_choice_for_text(
+        self, key: str, request: ChatRequest,
+    ) -> PendingTickerChoice | None:
+        active = self.pending_ticker_choices.get(key)
+        if active is None:
+            return None
+        if _is_explicit_ticker_choice(request.text, active.candidates):
+            return active
+        if request.reply_to_message_id is None:
+            return None
+        choice_id = self.pending_ticker_choice_by_message.get(
+            self._message_pending_key(
+                request.provider,
+                request.external_user_id,
+                request.external_chat_id,
+                request.reply_to_message_id,
+            )
+        )
+        if choice_id is None:
+            return None
+        return self.pending_ticker_choices.get(choice_id)
+
+    def _clear_ticker_choice(self, key: str, choice: PendingTickerChoice) -> None:
+        self.pending_ticker_choices.pop(choice.choice_id, None)
+        self.pending_ticker_choices.pop(key, None)
+        if choice.prompt_message_id is not None:
+            self.pending_ticker_choice_by_message.pop(
+                self._message_pending_key_from_pending_key(key, choice.prompt_message_id),
+                None,
+            )
 
     def _render_result(self, result: ToolResult) -> ChatReply:
         if result.data.get("confirmation_required"):
@@ -301,6 +390,15 @@ class ResearchChatService:
     def _pending_key(provider: str, user_id: str, chat_id: str) -> str:
         return f"{provider}:{user_id}:{chat_id}"
 
+    def _message_pending_key(
+        self, provider: str, user_id: str, chat_id: str, message_id: int,
+    ) -> str:
+        return f"{self._pending_key(provider, user_id, chat_id)}:{message_id}"
+
+    @staticmethod
+    def _message_pending_key_from_pending_key(key: str, message_id: int) -> str:
+        return f"{key}:{message_id}"
+
 
 def _looks_like_capability_question(text: str) -> bool:
     lowered = text.lower()
@@ -353,9 +451,32 @@ def _render_ticker_choices(choice: PendingTickerChoice) -> str:
         lines.append(f"{idx}. {candidate.label()}")
     lines.extend([
         "",
-        "回复序号、`港股`、`美股`、`OTC`，或直接回复 ticker。",
+        "请点按钮选择；也可以回复这条消息发送序号、`港股`、`美股`、`OTC`。",
+        "如果不回复这条消息，请直接发送完整 ticker，例如 `9988.HK`。",
     ])
     return "\n".join(lines)
+
+
+def _ticker_choice_reply(choice: PendingTickerChoice) -> ChatReply:
+    keyboard: list[list[dict[str, str]]] = []
+    for idx, candidate in enumerate(choice.candidates, start=1):
+        keyboard.append([{
+            "text": candidate.label(),
+            "callback_data": f"ticker_choice:{choice.choice_id}:{idx}",
+        }])
+    return ChatReply(
+        text=_render_ticker_choices(choice),
+        ok=False,
+        inline_keyboard=keyboard,
+        pending_interaction_id=choice.choice_id,
+    )
+
+
+def _is_explicit_ticker_choice(
+    text: str, candidates: tuple[TickerCandidate, ...],
+) -> bool:
+    lowered = text.strip().lower()
+    return any(lowered == candidate.symbol.lower() for candidate in candidates)
 
 
 def _select_ticker_candidate(

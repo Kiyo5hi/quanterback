@@ -47,3 +47,44 @@ def test_authorization_error_text_includes_user_and_chat_ids() -> None:
     assert "没有被授权" in text
     assert "user_id: 8024680950" in text
     assert "chat_id: -1001" in text
+
+
+def test_telegram_request_parses_reply_to_message_id() -> None:
+    bot = TelegramResearchBot(token="token", service=object())  # type: ignore[arg-type]
+
+    request = bot._to_request({
+        "message": {
+            "message_id": 10,
+            "text": "1",
+            "reply_to_message": {"message_id": 99},
+            "from": {"id": 123, "username": "alice"},
+            "chat": {"id": -1001},
+        }
+    })
+
+    assert request is not None
+    assert request.text == "1"
+    assert request.message_id == 10
+    assert request.reply_to_message_id == 99
+
+
+def test_telegram_request_parses_callback_query() -> None:
+    bot = TelegramResearchBot(token="token", service=object())  # type: ignore[arg-type]
+
+    request = bot._to_request({
+        "callback_query": {
+            "id": "cb1",
+            "data": "ticker_choice:abc123:2",
+            "from": {"id": 123, "username": "alice"},
+            "message": {
+                "message_id": 99,
+                "chat": {"id": -1001},
+            },
+        }
+    })
+
+    assert request is not None
+    assert request.text == "ticker_choice:abc123:2"
+    assert request.callback_query_id == "cb1"
+    assert request.callback_data == "ticker_choice:abc123:2"
+    assert request.message_id == 99

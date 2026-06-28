@@ -13,6 +13,9 @@ class ChatRequest(BaseModel):
     external_user_id: str
     external_chat_id: str
     message_id: int = 0
+    reply_to_message_id: int | None = None
+    callback_query_id: str | None = None
+    callback_data: str | None = None
     text: str
     display_name: str | None = None
     received_at: datetime
@@ -33,4 +36,5 @@ class ChatReply(BaseModel):
     text: str
     ok: bool = True
     confirmation_required: bool = False
-
+    inline_keyboard: list[list[dict[str, str]]] | None = None
+    pending_interaction_id: str | None = None

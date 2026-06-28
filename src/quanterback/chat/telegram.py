@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from quanterback.chat.models import ChatRequest
+from quanterback.chat.models import ChatReply, ChatRequest
 from quanterback.chat.service import ResearchChatService
 
 log = logging.getLogger(__name__)
@@ -38,11 +38,12 @@ class TelegramResearchBot:
         self._send_message = f"https://api.telegram.org/bot{token}/sendMessage"
         self._send_chat_action = f"https://api.telegram.org/bot{token}/sendChatAction"
         self._edit_message = f"https://api.telegram.org/bot{token}/editMessageText"
+        self._answer_callback = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
 
     def listen(self) -> None:
         for request in self._updates():
             if not self._is_authorized(request):
-                self._reply(request, _authorization_error_text(request))
+                self._reply(request, ChatReply(text=_authorization_error_text(request), ok=False))
                 continue
             self._executor.submit(self._handle_one, request)
 
@@ -64,6 +65,8 @@ class TelegramResearchBot:
         return True
 
     def _handle_one(self, request: ChatRequest) -> None:
+        if request.callback_query_id:
+            self._answer_callback_query(request.callback_query_id)
         done = threading.Event()
         status = _ProcessingStatus()
         action_thread = threading.Thread(
@@ -81,17 +84,19 @@ class TelegramResearchBot:
             reply = self._service.handle(request)
             done.set()
             if status.message_id is not None:
-                self._edit(request, status.message_id, reply.text)
+                self._edit(request, status.message_id, reply)
+                self._bind_interaction_message(request, reply, status.message_id)
             else:
-                self._reply(request, reply.text)
+                sent_id = self._reply(request, reply)
+                self._bind_interaction_message(request, reply, sent_id)
         except Exception as exc:
             done.set()
             log.exception("Research chat request failed: %s", exc)
             text = f"处理失败: {str(exc)[:300]}"
             if status.message_id is not None:
-                self._edit(request, status.message_id, text)
+                self._edit(request, status.message_id, ChatReply(text=text, ok=False))
             else:
-                self._reply(request, text)
+                self._reply(request, ChatReply(text=text, ok=False))
 
     def _updates(self) -> Iterable[ChatRequest]:
         iters = 0
@@ -122,6 +127,9 @@ class TelegramResearchBot:
                     yield request
 
     def _to_request(self, update: dict) -> ChatRequest | None:
+        callback = update.get("callback_query")
+        if isinstance(callback, dict):
+            return self._callback_to_request(callback)
         msg = update.get("message")
         if not isinstance(msg, dict):
             return None
@@ -130,6 +138,11 @@ class TelegramResearchBot:
             return None
         user = msg.get("from") or {}
         chat = msg.get("chat") or {}
+        reply_to = msg.get("reply_to_message")
+        reply_to_message_id = None
+        if isinstance(reply_to, dict):
+            raw_reply_id = reply_to.get("message_id")
+            reply_to_message_id = int(raw_reply_id) if raw_reply_id is not None else None
         external_user_id = str(user.get("id") or chat.get("id") or "unknown")
         external_chat_id = str(chat.get("id") or external_user_id)
         display_name = (
@@ -144,13 +157,45 @@ class TelegramResearchBot:
             external_user_id=external_user_id,
             external_chat_id=external_chat_id,
             message_id=int(msg.get("message_id", 0)),
+            reply_to_message_id=reply_to_message_id,
             text=text,
             display_name=display_name,
             received_at=datetime.now(tz=timezone.utc),
         )
 
-    def _reply(self, request: ChatRequest, text: str) -> None:
-        for chunk in _split_for_tg(text):
+    def _callback_to_request(self, callback: dict) -> ChatRequest | None:
+        data = callback.get("data")
+        if not isinstance(data, str) or not data.strip():
+            return None
+        msg = callback.get("message") if isinstance(callback.get("message"), dict) else {}
+        user = callback.get("from") or {}
+        chat = msg.get("chat") or {}
+        external_user_id = str(user.get("id") or chat.get("id") or "unknown")
+        external_chat_id = str(chat.get("id") or external_user_id)
+        display_name = (
+            user.get("username")
+            or " ".join(
+                p for p in (user.get("first_name"), user.get("last_name")) if p
+            )
+            or None
+        )
+        message_id = int(msg.get("message_id", 0)) if isinstance(msg, dict) else 0
+        return ChatRequest(
+            provider="telegram",
+            external_user_id=external_user_id,
+            external_chat_id=external_chat_id,
+            message_id=message_id,
+            callback_query_id=str(callback.get("id") or ""),
+            callback_data=data,
+            text=data,
+            display_name=display_name,
+            received_at=datetime.now(tz=timezone.utc),
+        )
+
+    def _reply(self, request: ChatRequest, reply: ChatReply) -> int | None:
+        sent_id: int | None = None
+        chunks = _split_for_tg(reply.text)
+        for idx, chunk in enumerate(chunks):
             payload = {
                 "chat_id": request.external_chat_id,
                 "text": chunk,
@@ -158,15 +203,20 @@ class TelegramResearchBot:
                 "reply_to_message_id": request.message_id,
                 "allow_sending_without_reply": True,
             }
+            if idx == 0 and reply.inline_keyboard:
+                payload["reply_markup"] = {"inline_keyboard": reply.inline_keyboard}
             try:
                 resp = requests.post(self._send_message, json=payload, timeout=10)
                 if not resp.ok:
                     log.warning("Research reply failed %d: %s; retrying plain",
                                 resp.status_code, resp.text[:200])
                     payload.pop("parse_mode", None)
-                    requests.post(self._send_message, json=payload, timeout=10)
+                    resp = requests.post(self._send_message, json=payload, timeout=10)
+                if idx == 0 and resp.ok:
+                    sent_id = _message_id_from_response(resp)
             except Exception as exc:
                 log.warning("Research reply exception: %s", exc)
+        return sent_id
 
     def _send_status(self, request: ChatRequest, text: str) -> int | None:
         payload = {
@@ -190,8 +240,8 @@ class TelegramResearchBot:
             log.warning("Research status message exception: %s", exc)
         return None
 
-    def _edit(self, request: ChatRequest, message_id: int, text: str) -> None:
-        chunks = _split_for_tg(text)
+    def _edit(self, request: ChatRequest, message_id: int, reply: ChatReply) -> None:
+        chunks = _split_for_tg(reply.text)
         first, rest = chunks[0], chunks[1:]
         payload = {
             "chat_id": request.external_chat_id,
@@ -199,6 +249,8 @@ class TelegramResearchBot:
             "text": first,
             "parse_mode": "Markdown",
         }
+        if reply.inline_keyboard:
+            payload["reply_markup"] = {"inline_keyboard": reply.inline_keyboard}
         try:
             resp = requests.post(self._edit_message, json=payload, timeout=10)
             if not resp.ok:
@@ -208,9 +260,32 @@ class TelegramResearchBot:
                 requests.post(self._edit_message, json=payload, timeout=10)
         except Exception as exc:
             log.warning("Research edit exception: %s", exc)
-            self._reply(request, first)
+            self._reply(request, ChatReply(text=first, inline_keyboard=reply.inline_keyboard))
         for chunk in rest:
-            self._reply(request, chunk)
+            self._reply(request, ChatReply(text=chunk))
+
+    def _bind_interaction_message(
+        self, request: ChatRequest, reply: ChatReply, message_id: int | None,
+    ) -> None:
+        self._service.bind_interaction_message(
+            pending_interaction_id=reply.pending_interaction_id,
+            provider=request.provider,
+            external_user_id=request.external_user_id,
+            external_chat_id=request.external_chat_id,
+            message_id=message_id,
+        )
+
+    def _answer_callback_query(self, callback_query_id: str) -> None:
+        if not callback_query_id:
+            return
+        try:
+            requests.post(
+                self._answer_callback,
+                json={"callback_query_id": callback_query_id},
+                timeout=5,
+            )
+        except Exception as exc:
+            log.debug("Research answerCallbackQuery failed: %s", exc)
 
     def _keep_typing(self, request: ChatRequest, done: threading.Event) -> None:
         while not done.is_set():
@@ -238,6 +313,18 @@ def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if cur:
         out.append(cur)
     return out
+
+
+def _message_id_from_response(resp: requests.Response) -> int | None:
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    result = body.get("result") if isinstance(body, dict) else None
+    if not isinstance(result, dict):
+        return None
+    message_id = result.get("message_id")
+    return int(message_id) if message_id is not None else None
 
 
 def _authorization_error_text(request: ChatRequest) -> str:
