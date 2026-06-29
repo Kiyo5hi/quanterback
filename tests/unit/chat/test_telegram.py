@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 
 from quanterback.chat.models import ChatReply, ChatRequest
 from quanterback.chat.telegram import TelegramResearchBot, _authorization_error_text
@@ -98,7 +99,7 @@ def test_telegram_callback_edits_original_message_without_status() -> None:
         def bind_interaction_message(self, **_kwargs) -> None:
             return None
 
-    edits: list[tuple[int, str]] = []
+    edits: list[tuple[int, str, list[list[dict[str, str]]] | None]] = []
     bot = TelegramResearchBot(token="token", service=FakeService())  # type: ignore[arg-type]
     bot._answer_callback_query = lambda _callback_id: None  # type: ignore[method-assign]
     bot._keep_typing = lambda _request, _done: None  # type: ignore[method-assign]
@@ -107,7 +108,7 @@ def test_telegram_callback_edits_original_message_without_status() -> None:
     )
 
     def fake_edit(_request: ChatRequest, message_id: int, reply: ChatReply) -> None:
-        edits.append((message_id, reply.text))
+        edits.append((message_id, reply.text, reply.inline_keyboard))
 
     bot._edit = fake_edit  # type: ignore[method-assign]
     bot._handle_one(ChatRequest(
@@ -122,6 +123,19 @@ def test_telegram_callback_edits_original_message_without_status() -> None:
     ))
 
     assert edits == [
-        (99, "收到，我正在分析这个标的。"),
-        (99, "QQQ 研究结果"),
+        (99, "收到，我正在分析这个标的。", None),
+        (99, "QQQ 研究结果", None),
     ]
+
+
+def test_telegram_edit_clears_inline_keyboard_when_reply_has_no_buttons() -> None:
+    bot = TelegramResearchBot(token="token", service=object())  # type: ignore[arg-type]
+    response = Mock()
+    response.ok = True
+    response.json.return_value = {"ok": True, "result": {"message_id": 99}}
+
+    with patch("quanterback.chat.telegram.requests.post", return_value=response) as post:
+        bot._edit(_request(), 99, ChatReply(text="处理中"))
+
+    payload = post.call_args.kwargs["json"]
+    assert payload["reply_markup"] == {"inline_keyboard": []}

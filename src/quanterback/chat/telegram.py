@@ -250,8 +250,7 @@ class TelegramResearchBot:
             "text": first,
             "parse_mode": "Markdown",
         }
-        if reply.inline_keyboard:
-            payload["reply_markup"] = {"inline_keyboard": reply.inline_keyboard}
+        payload["reply_markup"] = {"inline_keyboard": reply.inline_keyboard or []}
         try:
             resp = requests.post(self._edit_message, json=payload, timeout=10)
             if not resp.ok:
