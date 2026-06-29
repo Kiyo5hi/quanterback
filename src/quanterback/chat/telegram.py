@@ -66,7 +66,8 @@ class TelegramResearchBot:
 
     def _handle_one(self, request: ChatRequest) -> None:
         if request.callback_query_id:
-            self._answer_callback_query(request.callback_query_id)
+            self._handle_callback(request)
+            return
         done = threading.Event()
         status = _ProcessingStatus()
         action_thread = threading.Thread(
@@ -298,6 +299,35 @@ class TelegramResearchBot:
             except Exception as exc:
                 log.debug("Research chat action failed: %s", exc)
             done.wait(4)
+
+    def _handle_callback(self, request: ChatRequest) -> None:
+        self._answer_callback_query(request.callback_query_id or "")
+        done = threading.Event()
+        action_thread = threading.Thread(
+            target=self._keep_typing,
+            args=(request, done),
+            name="telegram-typing",
+            daemon=True,
+        )
+        action_thread.start()
+        self._edit(
+            request,
+            request.message_id,
+            ChatReply(text="收到，我正在分析这个标的。"),
+        )
+        try:
+            reply = self._service.handle(request)
+            done.set()
+            self._edit(request, request.message_id, reply)
+            self._bind_interaction_message(request, reply, request.message_id)
+        except Exception as exc:
+            done.set()
+            log.exception("Research chat callback failed: %s", exc)
+            self._edit(
+                request,
+                request.message_id,
+                ChatReply(text=f"处理失败: {str(exc)[:300]}", ok=False),
+            )
 
 def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if len(text) <= limit:

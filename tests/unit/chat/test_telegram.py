@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from quanterback.chat.models import ChatRequest
+from quanterback.chat.models import ChatReply, ChatRequest
 from quanterback.chat.telegram import TelegramResearchBot, _authorization_error_text
 
 
@@ -88,3 +88,40 @@ def test_telegram_request_parses_callback_query() -> None:
     assert request.callback_query_id == "cb1"
     assert request.callback_data == "ticker_choice:abc123:2"
     assert request.message_id == 99
+
+
+def test_telegram_callback_edits_original_message_without_status() -> None:
+    class FakeService:
+        def handle(self, _request: ChatRequest) -> ChatReply:
+            return ChatReply(text="QQQ 研究结果")
+
+        def bind_interaction_message(self, **_kwargs) -> None:
+            return None
+
+    edits: list[tuple[int, str]] = []
+    bot = TelegramResearchBot(token="token", service=FakeService())  # type: ignore[arg-type]
+    bot._answer_callback_query = lambda _callback_id: None  # type: ignore[method-assign]
+    bot._keep_typing = lambda _request, _done: None  # type: ignore[method-assign]
+    bot._send_status = lambda _request, _text: (_ for _ in ()).throw(  # type: ignore[method-assign]
+        AssertionError("callback must not send a new status message")
+    )
+
+    def fake_edit(_request: ChatRequest, message_id: int, reply: ChatReply) -> None:
+        edits.append((message_id, reply.text))
+
+    bot._edit = fake_edit  # type: ignore[method-assign]
+    bot._handle_one(ChatRequest(
+        provider="telegram",
+        external_user_id="u1",
+        external_chat_id="c1",
+        message_id=99,
+        callback_query_id="cb1",
+        callback_data="ticker_choice:abc123:1",
+        text="ticker_choice:abc123:1",
+        received_at=datetime.now(tz=timezone.utc),
+    ))
+
+    assert edits == [
+        (99, "收到，我正在分析这个标的。"),
+        (99, "QQQ 研究结果"),
+    ]
